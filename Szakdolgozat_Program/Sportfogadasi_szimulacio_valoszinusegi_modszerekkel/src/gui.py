@@ -1,15 +1,28 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from api_requests import get_leagues, get_teams, get_fixtures
 from datetime import datetime
+from api_requests import get_leagues, get_teams, get_fixtures, write_to_file, read_from_file
+
+def save_leagues_if_not_exists():
+    """
+    Ligák lekérése és fájlba mentése, ha a fájl nem létezik.
+    """
+    leagues = read_from_file('leagues.json')
+    if not leagues:  # Ha üres, akkor le kell kérni és menteni
+        leagues = get_leagues()
+        if leagues:
+            write_to_file(leagues, 'leagues.json')
+        else:
+            messagebox.showerror("Hiba", "Nem sikerült lekérni a ligákat az API-ból.")
+    return leagues
 
 class SportsApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Sports Betting Simulation")
 
-        # Ligák lekérése
-        self.leagues = get_leagues()
+        # Ligák beolvasása vagy lekérése és mentése, ha szükséges
+        self.leagues = save_leagues_if_not_exists()
         self.league_names = [f"{league['name']} - {league['country']}" for league in self.leagues]
 
         # Liga választó lista
@@ -62,16 +75,21 @@ class SportsApp:
 
         league_id = self.leagues[self.league_combo.current()].get('id')
 
+        # Csapatok lekérdezése és mentése fájlba
         teams = get_teams(league_id, season)
         if teams:
-            self.result_text.delete(1.0, tk.END)
-            self.result_text.insert(tk.END, f"{selected_league} liga csapatai ({season} szezon):\n")
-            for team in teams:
-                self.result_text.insert(tk.END, f"Csapat: {team['name']} - Ország: {team['country']} - Logo: {team['logo']}\n")
+            write_to_file(teams, 'teams.json')
         else:
             messagebox.showerror("Hiba", "Nem sikerült csapatokat lekérni.")
+            return
+
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END, f"{selected_league} liga csapatai ({season} szezon):\n")
+        for team in teams:
+            self.result_text.insert(tk.END, f"Csapat: {team['name']} - Ország: {team['country']} - Logo: {team['logo']}\n")
 
     def get_fixtures(self):
+        print("get_fixtures meghívódott")  # Debug üzenet
         selected_league = self.league_combo.get()
         season = self.season_entry.get()
         from_date = self.from_date_entry.get()
@@ -81,28 +99,26 @@ class SportsApp:
             messagebox.showwarning("Hiányzó adatok", "Kérlek válassz egy ligát, add meg a szezon évét és a dátumokat.")
             return
 
-        # Szezon dátumok ellenőrzése
+        # Ellenőrizzük, hogy a szezon négyjegyű szám, és a dátumok helyesen vannak-e formázva
         try:
-            season_start = datetime.strptime(f"{int(season)-1}-08-01", "%Y-%m-%d")  # Pl. 2020 szezon: 2019-08-01 kezdettel
-            season_end = datetime.strptime(f"{season}-07-31", "%Y-%m-%d")  # Pl. 2020 szezon: 2020-07-31 véggel
-            from_date_dt = datetime.strptime(from_date, "%Y-%m-%d")
-            to_date_dt = datetime.strptime(to_date, "%Y-%m-%d")
-
-            if not (season_start <= from_date_dt <= season_end and season_start <= to_date_dt <= season_end):
-                messagebox.showerror("Hiba", "A megadott dátumok nem illeszkednek a kiválasztott szezonhoz.")
-                return
+            int(season)  # Ellenőrizzük, hogy a szezon év számból áll
+            datetime.strptime(from_date, "%Y-%m-%d")  # Kezdő dátum formátum ellenőrzése
+            datetime.strptime(to_date, "%Y-%m-%d")  # Záró dátum formátum ellenőrzése
         except ValueError:
             messagebox.showerror("Hiba", "Kérlek, érvényes dátumformátumot adj meg (YYYY-MM-DD).")
             return
 
         league_id = self.leagues[self.league_combo.current()].get('id')
 
-        fixtures = get_fixtures(league_id, season, from_date=from_date, to_date=to_date, timezone="Europe/London")
-        if fixtures:
-            self.result_text.delete(1.0, tk.END)
-            self.result_text.insert(tk.END, f"{selected_league} liga mérkőzései ({season} szezon) - {from_date} és {to_date} között:\n")
-            for fixture in fixtures[:10]:  # Csak az első 10 mérkőzés megjelenítése
-                self.result_text.insert(tk.END, f"Mérkőzés ID: {fixture['id']} - {fixture['home_team']} vs {fixture['away_team']} - Dátum: {fixture['date']} - Eredmény: {fixture['score']} - Státusz: {fixture['status']}\n")
-        else:
+        # Mérkőzések lekérdezése és fájlba mentése
+        fixtures = get_fixtures(league_id, int(season), from_date=from_date, to_date=to_date)
+        if not fixtures:
             messagebox.showerror("Hiba", "Nem sikerült mérkőzéseket lekérni.")
+            return
 
+        self.result_text.delete(1.0, tk.END)
+        self.result_text.insert(tk.END,
+                                f"{selected_league} liga mérkőzései ({season} szezon) - {from_date} és {to_date} között:\n")
+        for fixture in fixtures:  # Csak az első 10 mérkőzés megjelenítése
+            self.result_text.insert(tk.END,
+                                    f"Mérkőzés ID: {fixture['id']} - {fixture['home_team']} vs {fixture['away_team']} - Dátum: {fixture['date']} - Eredmény: {fixture['score']} - Státusz: {fixture['status']}\n")
