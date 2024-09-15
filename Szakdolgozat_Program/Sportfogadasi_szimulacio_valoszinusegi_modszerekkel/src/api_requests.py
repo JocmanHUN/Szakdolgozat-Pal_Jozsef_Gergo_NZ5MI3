@@ -74,7 +74,7 @@ def get_teams(league_id, season):
         print(f"API hiba történt: {e}")
         return []
 
-def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, status=None, timezone="Europe/Budapest"):
+def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, status=None, timezone="Europe/Budapest", file_type="actual"):
     """
     Mérkőzések lekérése az API-ról és fájlba mentése.
     :param league_id: A liga azonosítója.
@@ -84,11 +84,13 @@ def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, 
     :param team_id: Csapat azonosító (opcionális).
     :param status: Mérkőzés státusz (opcionális).
     :param timezone: Időzóna (alapértelmezett "Europe/Budapest").
+    :param file_type: Fájl típusa ("actual" vagy "past") a megfelelő fájl megnevezéshez.
     :return: A mérkőzések listája.
     """
-    print('asd')
-    # Töröljük a fixtures.json fájlt, ha létezik
-    clear_file('fixtures.json')
+    filename = f"{file_type}_fixtures.json"
+
+    # Mindig töröljük a fájlt, mielőtt friss adatokat kérünk le
+    clear_file(filename)
 
     url = f"{BASE_URL}fixtures"
     headers = {
@@ -130,8 +132,8 @@ def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, 
                 for fixture in data.get('response', [])
             ]
             if fixtures:
-                write_to_file(fixtures, 'fixtures.json')
-                print(f"Sikeresen mentve a(z) {len(fixtures)} mérkőzés a fixtures.json fájlba.")
+                write_to_file(fixtures, filename)  # Írd felül az új adatokkal
+                print(f"Sikeresen mentve a(z) {len(fixtures)} mérkőzés a {filename} fájlba.")
             else:
                 print("Nincsenek mérkőzések a megadott paraméterek alapján.")
             return fixtures
@@ -141,3 +143,66 @@ def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, 
     except requests.exceptions.RequestException as e:
         print(f"API hiba történt: {e}")
         return []
+
+def create_directory(path):
+    """
+    Létrehozza a mappát, ha nem létezik.
+    :param path: A mappa elérési útja.
+    """
+    try:
+        os.makedirs(path, exist_ok=True)
+        print(f"Mappa létrehozva: {path}")
+    except OSError as e:
+        print(f"Nem sikerült létrehozni a mappát: {path}, Hiba: {e}")
+
+
+def normalize_filename(filename):
+    # Helyettesíti az érvénytelen karaktereket és kisbetűsít mindent
+    return filename.replace(":", "-").replace("/", "-").replace("\\", "-").replace(" ", "_").lower()
+
+def get_match_statistics(match_id, league_name, home_team, away_team, match_date):
+    """
+    Lekéri a mérkőzés statisztikáit és fájlba menti a megfelelő mappastruktúrában.
+    :param match_id: A mérkőzés azonosítója
+    :param league_name: A liga neve
+    :param home_team: Hazai csapat neve
+    :param away_team: Vendég csapat neve
+    :param match_date: A mérkőzés dátuma (pl. "2022-08-07")
+    :return: A mérkőzés statisztikái
+    """
+    # Normálizált liga neve és fájl elérési útvonalak létrehozása
+    league_path = os.path.join("statistics", normalize_filename(league_name))
+    os.makedirs(league_path, exist_ok=True)  # Mappa létrehozása, ha nem létezik
+
+    # Fájlnév generálása az év, hónap, nap formátumban a match_date alapján
+    match_date_formatted = match_date.split("T")[0]  # Csak az év, hónap, nap
+    filename = f"{home_team}_vs_{away_team}_{match_date_formatted}_statistics.json"
+    filepath = os.path.join(league_path, normalize_filename(filename))
+
+    # Ha a fájl már létezik, olvassuk be a statisztikákat
+    if os.path.exists(filepath):
+        print(f"Statisztikák betöltése fájlból: {filepath}")
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    # API lekérdezés
+    url = f"{BASE_URL}fixtures/statistics"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {'fixture': match_id}
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()  # Hibakezelés HTTP hibákra
+        data = response.json().get('response', [])
+
+        # Statisztikák mentése fájlba
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        print(f"Statisztikák mentése fájlba: {filepath}")
+        return data
+    except requests.exceptions.RequestException as e:
+        print(f"Nem sikerült lekérni a statisztikákat: {e}")
+        raise e

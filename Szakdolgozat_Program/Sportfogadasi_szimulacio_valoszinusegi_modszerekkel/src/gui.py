@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
-from api_requests import get_teams, get_fixtures
+from api_requests import get_teams, get_fixtures, get_match_statistics  # Tegyük fel, hogy van ilyen függvény
 from helpersAPI import write_to_file, clear_file
 from helpersGUI import save_leagues_if_not_exists
 
@@ -131,6 +131,9 @@ class PastResultsApp:
         self.results_tree.heading("Status", text="Státusz")
         self.results_tree.pack(pady=20)
 
+        # Kattintás esemény a sorokra
+        self.results_tree.bind("<Double-1>", self.show_match_statistics)
+
     def get_past_fixtures(self):
         selected_league = self.league_combo.get()
         season = self.season_entry.get()
@@ -150,24 +153,88 @@ class PastResultsApp:
             return
 
         league_id = self.leagues[self.league_combo.current()].get('id')
-        clear_file('past_fixtures.json')  # Töröljük a múltbéli mérkőzések fájlt
-        fixtures = get_fixtures(league_id, int(season), from_date=from_date, to_date=to_date)
+        # A múltbéli mérkőzések lekérése a "past" file_type paraméterrel
+        fixtures = get_fixtures(league_id, int(season), from_date=from_date, to_date=to_date, file_type="past")
 
         if fixtures:
-            write_to_file(fixtures, 'past_fixtures.json')  # Múltbéli mérkőzések mentése
-
             # Töröljük a régi adatokat a táblázatból
             for row in self.results_tree.get_children():
                 self.results_tree.delete(row)
 
             # Új adatok hozzáadása a táblázathoz
             for fixture in fixtures:
-                score = f"{fixture['score']['home']} - {fixture['score']['away']}" if fixture['score'] else "N/A"
+                # Formázott eredmény létrehozása
+                home_score = fixture['score']['home']
+                away_score = fixture['score']['away']
+                formatted_score = f"{home_score} - {away_score}"  # Olvasható formátum
+
                 self.results_tree.insert("", "end", values=(
-                    fixture['id'], fixture['home_team'], fixture['away_team'], fixture['date'], score, fixture['status']
+                    fixture['id'], fixture['home_team'], fixture['away_team'], fixture['date'], formatted_score,
+                    fixture['status']
                 ))
         else:
             messagebox.showinfo("Nincs találat", "Nincsenek találatok a megadott szezonban és dátumok között.")
+
+    def show_match_statistics(self, event=None):
+        selected_item = self.results_tree.selection()
+        if not selected_item:
+            return
+
+        # Kiválasztott mérkőzés adatai
+        match_data = self.results_tree.item(selected_item, 'values')
+        match_id = match_data[0]  # Mérkőzés ID
+        league_name = self.league_combo.get()  # A kiválasztott liga neve
+        home_team = match_data[1]  # Hazai csapat neve
+        away_team = match_data[2]  # Vendég csapat neve
+        match_date = match_data[3]
+        formatted_date = datetime.fromisoformat(match_date[:-6]).strftime("%Y-%m-%d")
+
+        try:
+            statistics = get_match_statistics(match_id, league_name, home_team, away_team, formatted_date)
+        except Exception as e:
+            messagebox.showerror("Hiba", f"Nem sikerült lekérni a statisztikákat: {str(e)}")
+            return
+
+        # Új ablak a statisztikák megjelenítésére
+        stats_window = tk.Toplevel(self.root)
+        stats_window.title("Mérkőzés Statisztikák")
+
+        # Két oszlopos Treeview táblázat létrehozása a statisztikák megjelenítéséhez
+        stats_tree = ttk.Treeview(stats_window, columns=("Statistic", home_team, away_team), show="headings")
+        stats_tree.heading("Statistic", text="Statisztika")
+        stats_tree.heading(home_team, text=home_team)
+        stats_tree.heading(away_team, text=away_team)
+        stats_tree.pack(pady=20, fill='both', expand=True)
+
+        # Adatok strukturálása két csapat statisztikáira
+        home_stats = {}
+        away_stats = {}
+
+        # Statisztikák feldolgozása
+        if statistics:
+            for stat in statistics:
+                team_name = stat.get('team', {}).get('name', 'Ismeretlen csapat')
+                for detail in stat.get('statistics', []):
+                    stat_type = detail['type']
+                    stat_value = detail['value']
+                    if team_name == home_team:
+                        home_stats[stat_type] = stat_value
+                    elif team_name == away_team:
+                        away_stats[stat_type] = stat_value
+
+            # Kombinált statisztikák hozzáadása a táblázathoz
+            all_stats = set(home_stats.keys()).union(set(away_stats.keys()))
+            for stat_type in all_stats:
+                home_value = home_stats.get(stat_type, 'N/A')
+                away_value = away_stats.get(stat_type, 'N/A')
+                stats_tree.insert("", "end", values=(stat_type, home_value, away_value))
+        else:
+            stats_tree.insert("", "end", values=("Nincs adat", "N/A", "N/A"))
+
+        # Görgetősáv hozzáadása a Treeview-hoz
+        scrollbar = ttk.Scrollbar(stats_window, orient="vertical", command=stats_tree.yview)
+        stats_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
 
 class TeamsApp:
     def __init__(self, root):

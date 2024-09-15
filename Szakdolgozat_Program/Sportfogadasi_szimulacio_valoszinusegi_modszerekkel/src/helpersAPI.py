@@ -9,7 +9,6 @@ def write_to_file(data, filename):
     try:
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
-        print(f"Sikeresen mentve a(z) {filename} fájlba.")
     except IOError as e:
         print(f"Nem sikerült a fájlba írás: {e}")
 
