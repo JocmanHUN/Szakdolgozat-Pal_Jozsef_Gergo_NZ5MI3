@@ -3,47 +3,7 @@ import requests
 import os
 import json
 from config import API_KEY, BASE_URL, HOST
-
-def write_to_file(data, filename):
-    """
-    Adatok mentése JSON formátumban egy fájlba.
-    :param data: A mentendő adatok (list vagy dict).
-    :param filename: A fájl neve, amibe menteni szeretnénk.
-    """
-    try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        print(f"Sikeresen mentve a(z) {filename} fájlba.")
-    except IOError as e:
-        print(f"Nem sikerült a fájlba írás: {e}")
-
-def read_from_file(filename):
-    """
-    Adatok beolvasása fájlból.
-    :param filename: A fájl neve, amit be kell olvasni.
-    :return: Az adatok listája vagy üres lista, ha a fájl nem található.
-    """
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return data
-    except FileNotFoundError:
-        return []  # Üres listával tér vissza, ha a fájl nem létezik
-
-def clear_file(filename):
-    """
-    Törli a fájl tartalmát, ha létezik és nem üres.
-    :param filename: A fájl neve.
-    """
-    try:
-        if os.path.exists(filename):
-            os.remove(filename)  # Teljes törlés
-            print(f"{filename} fájl törölve.")
-        else:
-            print(f"{filename} fájl nem létezett, nincs mit törölni.")
-    except IOError as e:
-        print(f"Nem sikerült törölni a fájlt: {e}")
-
+from helpersAPI import write_to_file, read_from_file, clear_file
 def get_leagues():
     """
     Ligák lekérése az API-ról és fájlba mentése.
