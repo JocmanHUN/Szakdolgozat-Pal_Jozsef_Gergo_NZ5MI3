@@ -1,9 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
-from api_requests import get_teams, get_fixtures, get_match_statistics, get_team_statistics
-from helpersAPI import write_to_file, clear_file
-from helpersGUI import save_leagues_if_not_exists
+from src.Backend.api_requests import get_teams, get_fixtures, get_match_statistics, get_team_statistics
+from src.Backend.helpersAPI import write_to_file, clear_file
+from src.Frontend.helpersGUI import save_leagues_if_not_exists
 from PIL import Image, ImageTk
 import requests
 from io import BytesIO

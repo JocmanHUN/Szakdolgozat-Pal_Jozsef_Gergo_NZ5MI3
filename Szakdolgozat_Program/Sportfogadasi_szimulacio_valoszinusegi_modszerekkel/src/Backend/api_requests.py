@@ -2,8 +2,8 @@
 import requests
 import os
 import json
-from config import API_KEY, BASE_URL, HOST
-from helpersAPI import write_to_file, read_from_file, clear_file
+from src.config import API_KEY, BASE_URL, HOST
+from src.Backend.helpersAPI import write_to_file, read_from_file, clear_file
 def get_leagues():
     """
     Ligák lekérése az API-ról és fájlba mentése.
@@ -171,7 +171,7 @@ def get_match_statistics(match_id, league_name, home_team, away_team, match_date
     :return: A mérkőzés statisztikái
     """
     # Normálizált liga neve és fájl elérési útvonalak létrehozása
-    league_path = os.path.join("statistics", normalize_filename(league_name))
+    league_path = os.path.join("../statistics", normalize_filename(league_name))
     os.makedirs(league_path, exist_ok=True)  # Mappa létrehozása, ha nem létezik
 
     # Fájlnév generálása az év, hónap, nap formátumban a match_date alapján

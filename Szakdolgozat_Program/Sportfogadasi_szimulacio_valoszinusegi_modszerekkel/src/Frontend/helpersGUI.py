@@ -1,7 +1,7 @@
 from tkinter import messagebox
 
-from helpersAPI import  read_from_file, write_to_file
-from api_requests import get_leagues
+from src.Backend.helpersAPI import  read_from_file, write_to_file
+from src.Backend.api_requests import get_leagues
 def save_leagues_if_not_exists():
     """
     Ligák lekérése és fájlba mentése, ha a fájl nem létezik.

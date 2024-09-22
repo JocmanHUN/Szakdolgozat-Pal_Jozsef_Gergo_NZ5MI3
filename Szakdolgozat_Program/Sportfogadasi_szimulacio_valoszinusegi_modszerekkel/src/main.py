@@ -1,4 +1,4 @@
-from gui import SportsApp
+from src.Frontend.gui import SportsApp
 import tkinter as tk
 
 def main():
