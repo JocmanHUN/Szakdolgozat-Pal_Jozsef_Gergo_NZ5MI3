@@ -6,72 +6,73 @@ from src.Frontend.helpersGUI import save_leagues_if_not_exists
 from PIL import Image, ImageTk
 import requests
 from io import BytesIO
-class TeamsApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Csapatok Megtekintése")
-        self.root.geometry("400x600")  # Beállítjuk az ablak méretét
 
-        # Liga választó lista
+class TeamsApp(tk.Frame):
+    def __init__(self, app):
+        super().__init__(app.root)
+        self.app = app
+
+        # Itt végigmegyünk a ligákon és hozzáadjuk a 'name' és 'country' adatokat a listához
         self.leagues = save_leagues_if_not_exists()
-        self.league_names = [f"{league['name']} - {league['country']}" for league in self.leagues]
+        self.league_names = [f"{league['name']} - {league['country']}" for league in self.leagues]  # Javítás itt
 
-        self.league_label = ttk.Label(root, text="Válaszd ki a ligát:")
+        self.seasons = [f"{year}/{year+1}" for year in range(2024, 1999, -1)]  # Szezon kiválasztás listája
+
+        # Liga kiválasztása
+        self.league_label = ttk.Label(self, text="Válasszon ligát:")
         self.league_label.pack(pady=10)
 
-        self.league_combo = ttk.Combobox(root, values=self.league_names)
+        self.league_combo = ttk.Combobox(self, values=self.league_names, state="readonly")
+        self.league_combo.set("Válasszon ligát...")  # Halvány háttérszöveg
         self.league_combo.pack(pady=10)
 
-        # Szezon mező
-        self.season_label = ttk.Label(root, text="Add meg a szezon évét:")
+        # Szezon kiválasztása
+        self.season_label = ttk.Label(self, text="Válasszon szezont:")
         self.season_label.pack(pady=10)
 
-        self.season_entry = ttk.Entry(root)
-        self.season_entry.pack(pady=10)
+        self.season_combo = ttk.Combobox(self, values=self.seasons, state="readonly")
+        self.season_combo.set("Válasszon szezont...")  # Halvány háttérszöveg
+        self.season_combo.pack(pady=10)
 
-        # Csapatok lekérő gomb
-        self.teams_button = ttk.Button(root, text="Csapatok lekérése", command=self.get_teams)
-        self.teams_button.pack(pady=10)
+        # Görgethető canvas a csapatok megjelenítéséhez
+        self.canvas = tk.Canvas(self)
+        self.canvas.pack(side="left", fill="both", expand=True)
 
-        # Görgethető Canvas és Scrollbar
-        self.canvas = tk.Canvas(root)
-        self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.canvas.yview)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.bind('<Configure>', lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+
         self.scrollable_frame = tk.Frame(self.canvas)
-
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(
-                scrollregion=self.canvas.bbox("all")
-            )
-        )
+        self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
 
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
+        # Gomb a csapatok lekérésére
+        self.teams_button = ttk.Button(self, text="Csapatok lekérése", command=self.get_teams)
+        self.teams_button.pack(pady=10)
 
-        # Képek tartásához szükséges lista, hogy ne törlődjenek a memóriából
+        # Vissza gomb
+        self.back_button = ttk.Button(self, text="Vissza", command=self.app.show_main_menu)
+        self.back_button.pack(pady=10)
+
+        # Hely az elmentett csapatlogóknak
         self.team_logos = []
-        self.teams = []  # Csapatok tárolása a későbbi statisztikákhoz
 
     def get_teams(self):
         selected_league = self.league_combo.get()
-        season = self.season_entry.get()
+        selected_season = self.season_combo.get()
 
-        if not selected_league or not season:
-            messagebox.showwarning("Hiányzó adatok", "Kérlek válassz egy ligát és add meg a szezon évét.")
+        if not selected_league or selected_league == "Válasszon ligát..." or not selected_season or selected_season == "Válasszon szezont...":
+            messagebox.showwarning("Hiányzó adatok", "Kérlek válassz egy ligát és egy szezont.")
             return
 
-        try:
-            int(season)  # Ellenőrizzük, hogy a szezon év számból áll
-        except ValueError:
-            messagebox.showerror("Hiba", "Kérlek, érvényes évszámot adj meg a szezonhoz.")
-            return
-
+        season_year = int(selected_season.split('/')[0])  # Csak az első évszámot használjuk
         league_id = self.leagues[self.league_combo.current()].get('id')
+
         clear_file('teams.json')  # Töröljük a csapatok fájlt
-        teams = get_teams(league_id, season)
+        teams = get_teams(league_id, season_year)
 
         if teams:
             write_to_file(teams, 'teams.json')  # Csapatok mentése
@@ -81,7 +82,7 @@ class TeamsApp:
                 widget.destroy()
 
             # Megjelenítjük a logókat és csapat neveket egy sorban
-            self.show_teams(teams, league_id, season)
+            self.show_teams(teams, league_id, season_year)
         else:
             messagebox.showinfo("Nincs találat", "Nincsenek csapatok a megadott szezonban.")
 
@@ -122,12 +123,17 @@ class TeamsApp:
     def show_team_statistics(self, team_id, league_id, season):
         stats = get_team_statistics(league_id, season, team_id)
 
+        # Töröljük az előző statisztikákat megjelenítő frame-et, ha van
+        if hasattr(self, 'stats_frame'):
+            self.stats_frame.destroy()
+
         if stats:
-            stats_window = tk.Toplevel(self.root)
-            stats_window.title("Csapat Statisztikák")
+            # Új frame létrehozása a statisztikák számára az aktuális ablakban
+            self.stats_frame = tk.Frame(self)
+            self.stats_frame.pack(fill='both', expand=True)
 
             # Notebook (fülek) létrehozása
-            notebook = ttk.Notebook(stats_window)
+            notebook = ttk.Notebook(self.stats_frame)
             notebook.pack(pady=10, fill='both', expand=True)
 
             # Fixtures fül és tartalom
@@ -143,13 +149,13 @@ class TeamsApp:
             if 'fixtures' in stats:
                 fixtures = stats['fixtures']
                 fixtures_tree.insert("", "end", values=(
-                "Played", fixtures['played']['home'], fixtures['played']['away'], fixtures['played']['total']))
+                    "Played", fixtures['played']['home'], fixtures['played']['away'], fixtures['played']['total']))
                 fixtures_tree.insert("", "end", values=(
-                "Wins", fixtures['wins']['home'], fixtures['wins']['away'], fixtures['wins']['total']))
+                    "Wins", fixtures['wins']['home'], fixtures['wins']['away'], fixtures['wins']['total']))
                 fixtures_tree.insert("", "end", values=(
-                "Draws", fixtures['draws']['home'], fixtures['draws']['away'], fixtures['draws']['total']))
+                    "Draws", fixtures['draws']['home'], fixtures['draws']['away'], fixtures['draws']['total']))
                 fixtures_tree.insert("", "end", values=(
-                "Loses", fixtures['loses']['home'], fixtures['loses']['away'], fixtures['loses']['total']))
+                    "Loses", fixtures['loses']['home'], fixtures['loses']['away'], fixtures['loses']['total']))
 
             # Goals fül és tartalom
             goals_frame = ttk.Frame(notebook)
@@ -164,10 +170,11 @@ class TeamsApp:
             if 'goals' in stats:
                 goals = stats['goals']
                 goals_tree.insert("", "end", values=(
-                "Scored", goals['for']['total']['home'], goals['for']['total']['away'], goals['for']['total']['total']))
+                    "Scored", goals['for']['total']['home'], goals['for']['total']['away'],
+                    goals['for']['total']['total']))
                 goals_tree.insert("", "end", values=(
-                "Conceded", goals['against']['total']['home'], goals['against']['total']['away'],
-                goals['against']['total']['total']))
+                    "Conceded", goals['against']['total']['home'], goals['against']['total']['away'],
+                    goals['against']['total']['total']))
 
             # Cards fül és tartalom
             cards_frame = ttk.Frame(notebook)
@@ -226,7 +233,7 @@ class TeamsApp:
 
                     yellow_total = yellow_cards_home + yellow_cards_away
                     yellow_tree.insert("", "end", values=(
-                    f"Yellow Cards ({interval} mins)", yellow_cards_home, yellow_cards_away, yellow_total))
+                        f"Yellow Cards ({interval} mins)", yellow_cards_home, yellow_cards_away, yellow_total))
 
                     red_total = red_cards_home + red_cards_away
                     red_tree.insert("", "end",
@@ -241,7 +248,7 @@ class TeamsApp:
                 red_total_sum = total_red_home + total_red_away
 
                 yellow_tree.insert("", "end", values=(
-                "Total Yellow Cards", total_yellow_home, total_yellow_away, yellow_total_sum))
+                    "Total Yellow Cards", total_yellow_home, total_yellow_away, yellow_total_sum))
                 red_tree.insert("", "end", values=("Total Red Cards", total_red_home, total_red_away, red_total_sum))
 
                 total_laps_home = total_yellow_home + total_red_home
