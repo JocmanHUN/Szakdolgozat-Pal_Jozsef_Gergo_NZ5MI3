@@ -206,3 +206,36 @@ def get_match_statistics(match_id, league_name, home_team, away_team, match_date
     except requests.exceptions.RequestException as e:
         print(f"Nem sikerült lekérni a statisztikákat: {e}")
         raise e
+
+
+def get_team_statistics(league_id, season, team_id, date=None):
+    """
+    Lekéri egy csapat statisztikáit egy adott liga és szezon alapján.
+    :param league_id: A liga azonosítója.
+    :param season: A szezon éve (YYYY formátumban).
+    :param team_id: A csapat azonosítója.
+    :param date: Opcionális dátum a statisztikák limitálásához.
+    :return: A csapat statisztikái.
+    """
+    url = f"{BASE_URL}teams/statistics"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {
+        'league': league_id,
+        'season': season,
+        'team': team_id
+    }
+
+    if date:
+        params['date'] = date  # Dátum hozzáadása, ha van
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        return response.json().get('response', {})
+    except requests.exceptions.RequestException as e:
+        print(f"API hiba történt a csapat statisztikáinak lekérésekor: {e}")
+        return {}
+
