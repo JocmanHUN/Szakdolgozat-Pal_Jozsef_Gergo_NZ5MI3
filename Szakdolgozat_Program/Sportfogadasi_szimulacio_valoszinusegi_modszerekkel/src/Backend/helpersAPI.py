@@ -1,4 +1,5 @@
-import json,os
+import json
+import os
 
 def write_to_file(data, filename):
     """
