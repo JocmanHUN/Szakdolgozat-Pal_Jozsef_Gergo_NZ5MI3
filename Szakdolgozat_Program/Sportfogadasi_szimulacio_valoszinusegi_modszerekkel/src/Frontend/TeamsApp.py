@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from src.Backend.api_requests import get_teams, get_team_statistics
-from src.Backend.helpersAPI import write_to_file, clear_file
+from src.Backend.helpersAPI import write_to_teams, read_from_teams
 from src.Frontend.helpersGUI import save_leagues_if_not_exists
 from PIL import Image, ImageTk
 import requests
@@ -14,7 +14,7 @@ class TeamsApp(tk.Frame):
 
         # Itt végigmegyünk a ligákon és hozzáadjuk a 'name' és 'country' adatokat a listához
         self.leagues = save_leagues_if_not_exists()
-        self.league_names = [f"{league['name']} - {league['country']}" for league in self.leagues]  # Javítás itt
+        self.league_names = [f"{league['name']} - {league['country']}" for league in self.leagues]
 
         self.seasons = [f"{year}/{year+1}" for year in range(2024, 1999, -1)]  # Szezon kiválasztás listája
 
@@ -34,6 +34,18 @@ class TeamsApp(tk.Frame):
         self.season_combo.set("Válasszon szezont...")  # Halvány háttérszöveg
         self.season_combo.pack(pady=10)
 
+        # Gombok elhelyezése egy külön konténerben
+        self.button_frame = tk.Frame(self)
+        self.button_frame.pack(pady=10)
+
+        # Csapatok lekérése gomb középen
+        self.teams_button = ttk.Button(self.button_frame, text="Csapatok lekérése", command=self.get_teams)
+        self.teams_button.pack(side="left", padx=5)
+
+        # Vissza gomb középen
+        self.back_button = ttk.Button(self.button_frame, text="Vissza", command=self.app.show_main_menu)
+        self.back_button.pack(side="left", padx=5)
+
         # Görgethető canvas a csapatok megjelenítéséhez
         self.canvas = tk.Canvas(self)
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -49,14 +61,6 @@ class TeamsApp(tk.Frame):
 
         self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
 
-        # Gomb a csapatok lekérésére
-        self.teams_button = ttk.Button(self, text="Csapatok lekérése", command=self.get_teams)
-        self.teams_button.pack(pady=10)
-
-        # Vissza gomb
-        self.back_button = ttk.Button(self, text="Vissza", command=self.app.show_main_menu)
-        self.back_button.pack(pady=10)
-
         # Hely az elmentett csapatlogóknak
         self.team_logos = []
 
@@ -71,11 +75,10 @@ class TeamsApp(tk.Frame):
         season_year = int(selected_season.split('/')[0])  # Csak az első évszámot használjuk
         league_id = self.leagues[self.league_combo.current()].get('id')
 
-        clear_file('teams.json')  # Töröljük a csapatok fájlt
         teams = get_teams(league_id, season_year)
 
         if teams:
-            write_to_file(teams, 'teams.json')  # Csapatok mentése
+            write_to_teams(teams, league_id)  # Csapatok mentése az adatbázisba a helyes paraméterekkel
             self.teams = teams  # Mentjük a csapatokat
             # Töröljük a régi adatokat a csapatok frame-jéből
             for widget in self.scrollable_frame.winfo_children():
@@ -122,17 +125,49 @@ class TeamsApp(tk.Frame):
 
     def show_team_statistics(self, team_id, league_id, season):
         stats = get_team_statistics(league_id, season, team_id)
+        selected_team = next((team for team in self.teams if team['id'] == team_id), None)  # A kiválasztott csapat
 
         # Töröljük az előző statisztikákat megjelenítő frame-et, ha van
         if hasattr(self, 'stats_frame'):
             self.stats_frame.destroy()
 
-        if stats:
-            # Új frame létrehozása a statisztikák számára az aktuális ablakban
+        # Töröljük a korábbi UI elemeket, hogy csak a csapat és statisztika jelenjen meg
+        self.league_label.pack_forget()
+        self.league_combo.pack_forget()
+        self.season_label.pack_forget()
+        self.season_combo.pack_forget()
+        self.button_frame.pack_forget()  # Eltüntetjük a gombokat
+
+        if stats and selected_team:
+            # Új frame létrehozása a statisztikák számára
             self.stats_frame = tk.Frame(self)
             self.stats_frame.pack(fill='both', expand=True)
 
-            # Notebook (fülek) létrehozása
+            # Csapat neve és logója megjelenítése a tetején
+            header_frame = tk.Frame(self.stats_frame)
+            header_frame.pack(pady=10)
+
+            # Csapat logója
+            logo_url = selected_team['logo']
+            if logo_url:
+                try:
+                    response = requests.get(logo_url)
+                    img_data = response.content
+                    img = Image.open(BytesIO(img_data))
+                    img = img.resize((100, 100))  # Nagyobb méret a statisztikához
+                    logo_photo = ImageTk.PhotoImage(img)
+
+                    logo_label = tk.Label(header_frame, image=logo_photo)
+                    logo_label.image = logo_photo  # Megtartjuk a referenciát, hogy ne törlődjön
+                    logo_label.pack(side="left", padx=10)
+                except Exception as e:
+                    print(f"Nem sikerült betölteni a képet: {e}")
+
+            # Csapat neve és szezon
+            team_info_label = tk.Label(header_frame, text=f"{selected_team['name']} - {season}/{season+1}", font=("Arial", 16))
+            team_info_label.pack(side="left", padx=10)
+
+            # Statisztikák megjelenítése notebookkal
             notebook = ttk.Notebook(self.stats_frame)
             notebook.pack(pady=10, fill='both', expand=True)
 
@@ -170,15 +205,45 @@ class TeamsApp(tk.Frame):
             if 'goals' in stats:
                 goals = stats['goals']
                 goals_tree.insert("", "end", values=(
-                    "Scored", goals['for']['total']['home'], goals['for']['total']['away'],
-                    goals['for']['total']['total']))
+                    "Scored", goals['for']['total']['home'], goals['for']['total']['away'], goals['for']['total']['total']))
                 goals_tree.insert("", "end", values=(
-                    "Conceded", goals['against']['total']['home'], goals['against']['total']['away'],
-                    goals['against']['total']['total']))
+                    "Conceded", goals['against']['total']['home'], goals['against']['total']['away'], goals['against']['total']['total']))
 
             # Cards fül és tartalom
             cards_frame = ttk.Frame(notebook)
             notebook.add(cards_frame, text="Cards Statisztikák")
+
+            # Yellow és Red cards megjelenítése
+            self.show_card_statistics(cards_frame, stats)
+
+            # Vissza gomb hozzáadása
+            back_button = ttk.Button(self.stats_frame, text="Vissza", command=self.show_teams_screen)
+            back_button.pack(pady=10)
+
+    def show_teams_screen(self):
+        """Visszaállítja a csapatok listáját és az eredeti layoutot."""
+        # Eltávolítjuk a statisztikai frame-et
+        if hasattr(self, 'stats_frame'):
+            self.stats_frame.destroy()
+
+        # Újra megjelenítjük az eredeti UI elemeket
+        self.league_label.pack(pady=10)
+        self.league_combo.pack(pady=10)
+        self.season_label.pack(pady=10)
+        self.season_combo.pack(pady=10)
+
+        # Újra elhelyezzük a gombokat a helyükre
+        self.button_frame.pack(pady=10)
+        self.teams_button.pack(side="left", padx=5)
+        self.back_button.pack(side="left", padx=5)
+
+        # A csapat lista és scrollable frame megjelenítése
+        self.canvas.pack(side="left", fill="both", expand=True)
+
+    def show_card_statistics(self, cards_frame, stats):
+        if 'cards' in stats:
+            cards = stats['cards']
+            intervals = ['0-15', '16-30', '31-45', '46-60', '61-75', '76-90', '91-105', '106-120']
 
             # Yellow Cards statisztika
             yellow_frame = ttk.Frame(cards_frame)
@@ -196,7 +261,7 @@ class TeamsApp(tk.Frame):
 
             # Görgetősáv hozzáadása a yellow_tree-hez
             scrollbar_yellow = ttk.Scrollbar(yellow_table_frame, orient="vertical", command=yellow_tree.yview)
-            yellow_tree.configure(yscroll=scrollbar_yellow.set)
+            yellow_tree.configure(yscrollcommand=scrollbar_yellow.set)
             scrollbar_yellow.pack(side="right", fill="y")
 
             # Red Cards statisztika
@@ -215,46 +280,39 @@ class TeamsApp(tk.Frame):
 
             # Görgetősáv hozzáadása a red_tree-hez
             scrollbar_red = ttk.Scrollbar(red_table_frame, orient="vertical", command=red_tree.yview)
-            red_tree.configure(yscroll=scrollbar_red.set)
+            red_tree.configure(yscrollcommand=scrollbar_red.set)
             scrollbar_red.pack(side="right", fill="y")
 
-            if 'cards' in stats:
-                cards = stats['cards']
-                intervals = ['0-15', '16-30', '31-45', '46-60', '61-75', '76-90', '91-105', '106-120']
+            total_yellow_home, total_yellow_away = 0, 0
+            total_red_home, total_red_away = 0, 0
 
-                total_yellow_home, total_yellow_away = 0, 0
-                total_red_home, total_red_away = 0, 0
+            for interval in intervals:
+                yellow_cards_home = cards['yellow'].get(interval, {}).get('total', 0) or 0
+                yellow_cards_away = cards['yellow'].get(interval, {}).get('total', 0) or 0
+                red_cards_home = cards['red'].get(interval, {}).get('total', 0) or 0
+                red_cards_away = cards['red'].get(interval, {}).get('total', 0) or 0
 
-                for interval in intervals:
-                    yellow_cards_home = cards['yellow'].get(interval, {}).get('total', 0) or 0
-                    yellow_cards_away = cards['yellow'].get(interval, {}).get('total', 0) or 0
-                    red_cards_home = cards['red'].get(interval, {}).get('total', 0) or 0
-                    red_cards_away = cards['red'].get(interval, {}).get('total', 0) or 0
-
-                    yellow_total = yellow_cards_home + yellow_cards_away
-                    yellow_tree.insert("", "end", values=(
-                        f"Yellow Cards ({interval} mins)", yellow_cards_home, yellow_cards_away, yellow_total))
-
-                    red_total = red_cards_home + red_cards_away
-                    red_tree.insert("", "end",
-                                    values=(f"Red Cards ({interval} mins)", red_cards_home, red_cards_away, red_total))
-
-                    total_yellow_home += yellow_cards_home
-                    total_yellow_away += yellow_cards_away
-                    total_red_home += red_cards_home
-                    total_red_away += red_cards_away
-
-                yellow_total_sum = total_yellow_home + total_yellow_away
-                red_total_sum = total_red_home + total_red_away
-
+                yellow_total = yellow_cards_home + yellow_cards_away
                 yellow_tree.insert("", "end", values=(
-                    "Total Yellow Cards", total_yellow_home, total_yellow_away, yellow_total_sum))
-                red_tree.insert("", "end", values=("Total Red Cards", total_red_home, total_red_away, red_total_sum))
+                    f"Yellow Cards ({interval} mins)", yellow_cards_home, yellow_cards_away, yellow_total))
 
-                total_laps_home = total_yellow_home + total_red_home
-                total_laps_away = total_yellow_away + total_red_away
-                total_laps = total_laps_home + total_laps_away
-                yellow_tree.insert("", "end", values=("Total Cards", total_laps_home, total_laps_away, total_laps))
+                red_total = red_cards_home + red_cards_away
+                red_tree.insert("", "end", values=(
+                    f"Red Cards ({interval} mins)", red_cards_home, red_cards_away, red_total))
 
-        else:
-            messagebox.showinfo("Nincs adat", "Nem állnak rendelkezésre statisztikák.")
+                total_yellow_home += yellow_cards_home
+                total_yellow_away += yellow_cards_away
+                total_red_home += red_cards_home
+                total_red_away += red_cards_away
+
+            yellow_total_sum = total_yellow_home + total_yellow_away
+            red_total_sum = total_red_home + total_red_away
+
+            yellow_tree.insert("", "end", values=(
+                "Total Yellow Cards", total_yellow_home, total_yellow_away, yellow_total_sum))
+            red_tree.insert("", "end", values=("Total Red Cards", total_red_home, total_red_away, red_total_sum))
+
+            total_laps_home = total_yellow_home + total_red_home
+            total_laps_away = total_yellow_away + total_red_away
+            total_laps = total_laps_home + total_laps_away
+            yellow_tree.insert("", "end", values=("Total Cards", total_laps_home, total_laps_away, total_laps))

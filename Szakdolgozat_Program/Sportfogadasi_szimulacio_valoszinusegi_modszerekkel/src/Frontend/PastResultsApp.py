@@ -1,11 +1,12 @@
-from src.Backend.api_requests import get_teams, get_fixtures, get_match_statistics, get_team_statistics
+from src.Backend.api_requests import get_fixtures, get_match_statistics
 import tkinter as tk
 from tkinter import ttk, messagebox
-from src.Backend.api_requests import get_fixtures
+from src.Backend.helpersAPI import read_from_fixtures, write_to_fixtures, read_from_leagues
 from src.Frontend.helpersGUI import save_leagues_if_not_exists
 from datetime import datetime
 from tkcalendar import DateEntry
 import pytz
+from src.Backend.helpersAPI import get_db_connection
 
 class PastResultsApp(tk.Frame):
     def __init__(self, app):
@@ -40,14 +41,14 @@ class PastResultsApp(tk.Frame):
         # Kezdő dátum
         self.from_date_label = ttk.Label(self, text="Add meg a kezdő dátumot (YYYY-MM-DD):")
         self.from_date_label.pack(pady=10)
-        self.from_date_entry = DateEntry(self, date_pattern='yyyy-mm-dd', state="normal", readonlybackground="white")
+        self.from_date_entry = DateEntry(self, date_pattern='yyyy-mm-dd', state="disabled", readonlybackground="white")
         self.from_date_entry.set_date(datetime.now())  # Alapértelmezett mai dátum
         self.from_date_entry.pack(pady=10)
 
         # Záró dátum
         self.to_date_label = ttk.Label(self, text="Add meg a záró dátumot (YYYY-MM-DD):")
         self.to_date_label.pack(pady=10)
-        self.to_date_entry = DateEntry(self, date_pattern='yyyy-mm-dd', state="normal", readonlybackground="white")
+        self.to_date_entry = DateEntry(self, date_pattern='yyyy-mm-dd', state="disabled", readonlybackground="white")
         self.to_date_entry.set_date(datetime.now())  # Alapértelmezett mai dátum
         self.to_date_entry.pack(pady=10)
 
@@ -75,34 +76,25 @@ class PastResultsApp(tk.Frame):
         """Frissíti a dátumválasztó minimum és maximum dátumát az adott szezon alapján."""
         season = self.season_combo.get()
 
-        # Ellenőrizzük, hogy a felhasználó választott-e szezont, vagy még mindig a placeholder van kiválasztva
         if season == "Válasszon szezont...":
-            return  # Ha a felhasználó nem választott ki szezont, kilépünk ebből a függvényből
+            return
 
-        # A szezon kezdete július 1., a zárása június 30.
         start_year = int(season.split('/')[0])
-        start_date = datetime(start_year, 7, 1)  # Július 1-jén kezdődik a szezon
-        end_date = datetime(start_year + 1, 6, 30)  # Június 30-án ér véget a szezon
+        start_date = datetime(start_year, 7, 16)
+        end_date = datetime(start_year + 1, 7, 15)
 
         try:
-            # Először újrakonfiguráljuk a widgeteket, hogy frissüljenek megfelelően
             self.from_date_entry.config(state='normal')
             self.to_date_entry.config(state='normal')
-
-            # Átállítjuk a dátumválasztók határait, hogy biztosan az előre váltás működjön
             self.from_date_entry.config(mindate=start_date, maxdate=end_date)
             self.to_date_entry.config(mindate=start_date, maxdate=end_date)
-
-            # Az alapértelmezett dátum beállítása a szezon kezdő dátumára (július 1) és záró dátumára (június 30)
             self.from_date_entry.set_date(start_date)
             self.to_date_entry.set_date(end_date)
-
-            # Visszaállítjuk a read-only állapotot, ha szükséges
             self.from_date_entry.config(state='readonly')
             self.to_date_entry.config(state='readonly')
-
         except Exception as e:
             messagebox.showerror("Hiba", f"A dátumválasztó frissítése nem sikerült: {str(e)}")
+
     def get_past_fixtures(self):
         selected_league = self.league_combo.get()
         season = self.season_combo.get()
@@ -113,81 +105,81 @@ class PastResultsApp(tk.Frame):
             messagebox.showwarning("Hiányzó adatok", "Kérlek válassz egy ligát, egy szezont, és add meg a dátumokat.")
             return
 
-        try:
-            league_id = self.leagues[self.league_combo.current()].get('id')
-            self.fixtures = get_fixtures(league_id, int(season.split('/')[0]), from_date=from_date, to_date=to_date, file_type="past")
-        except Exception as e:
-            messagebox.showerror("Hiba", f"Nem sikerült lekérni a mérkőzéseket: {str(e)}")
-            return
+        league_id = self.leagues[self.league_combo.current()].get('id')
+        season_year = int(season.split('/')[0])
 
-        self.show_fixtures_list()  # A lekért mérkőzések megjelenítése
+        # Adatok lekérése az adatbázisból
+        self.fixtures = read_from_fixtures(league_id, season_year, from_date, to_date)
+
+        if not self.fixtures:  # Ha nincs adat az adatbázisban, kérjük le az API-ból
+            try:
+                self.fixtures = get_fixtures(league_id, season_year, from_date=from_date, to_date=to_date)
+                if self.fixtures:
+                    write_to_fixtures(self.fixtures)  # Mentés az adatbázisba
+            except Exception as e:
+                messagebox.showerror("Hiba", f"Nem sikerült lekérni a mérkőzéseket: {str(e)}")
+                return
+
+        self.show_fixtures_list()
+
+    def load_leagues(self):
+        # A ligákat betöltjük az adatbázisból
+        return read_from_leagues()
+
+    def get_team_name_from_db(self, team_id):
+        """
+        Lekéri a csapat nevét az adatbázisból a megadott csapat ID alapján.
+        """
+        connection = get_db_connection()  # Az adatbázis kapcsolat itt jön létre
+        if connection is None:
+            return 'Unknown'
+
+        cursor = connection.cursor(dictionary=True)
+        query = "SELECT name FROM teams WHERE id = %s"
+        cursor.execute(query, (team_id,))
+        result = cursor.fetchone()
+        cursor.close()
+        connection.close()
+
+        return result['name'] if result else 'Unknown'
 
     def show_fixtures_list(self):
         """Visszatér a mérkőzések listájához a statisztikák nézetéből."""
-        # Ha a statisztikák frame meg van nyitva, töröljük
         if hasattr(self, 'stats_frame'):
             self.stats_frame.destroy()
 
-        # Újra megjelenítjük a mérkőzések listáját és a gombokat
         self.results_tree.pack(pady=20)
         self.fixtures_button.pack(pady=10)
         self.back_button.pack(pady=10)
 
-        # A mezők engedélyezése újra
         self.league_combo.config(state="normal")
         self.season_combo.config(state="normal")
         self.from_date_entry.config(state="normal")
         self.to_date_entry.config(state="normal")
 
-        # Töröljük az előző adatokat a táblázatból, ha vannak
         for row in self.results_tree.get_children():
             self.results_tree.delete(row)
 
-        # Új adatok hozzáadása a táblázathoz
         if self.fixtures:
             budapest_tz = pytz.timezone('Europe/Budapest')
             for fixture in self.fixtures:
-                home_score = fixture['score']['home']
-                away_score = fixture['score']['away']
+                home_score = fixture.get('score_home', 'N/A')
+                away_score = fixture.get('score_away', 'N/A')
                 formatted_score = f"{home_score} - {away_score}"
 
-                # Dátum formázása (UTC-ről Budapesti időzónára konvertálva)
                 match_date_utc = datetime.strptime(fixture['date'], "%Y-%m-%dT%H:%M:%S%z")
                 match_date_budapest = match_date_utc.astimezone(budapest_tz)
                 formatted_date = match_date_budapest.strftime("%Y-%m-%d %H:%M")
 
+                # Csapatnevek lekérése az adatbázisból
+                home_team_name = self.get_team_name_from_db(fixture['home_team_id'])
+                away_team_name = self.get_team_name_from_db(fixture['away_team_id'])
+
                 self.results_tree.insert("", "end", values=(
-                    fixture['id'], fixture['home_team'], fixture['away_team'], formatted_date, formatted_score,
-                    fixture['status']
+                    fixture['id'], home_team_name, away_team_name, formatted_date, formatted_score, fixture['status']
                 ))
         else:
             messagebox.showinfo("Nincs találat", "Nincsenek találatok a megadott szezonban és dátumok között.")
-
-    def get_past_fixtures(self):
-        selected_league = self.league_combo.get()
-        selected_season = self.season_combo.get()  # Lekérjük a kiválasztott szezont
-        from_date = self.from_date_entry.get()
-        to_date = self.to_date_entry.get()
-
-        if not selected_league or not selected_season or not from_date or not to_date:
-            messagebox.showwarning("Hiányzó adatok", "Kérlek válassz egy ligát, szezont, és add meg a dátumokat.")
-            return
-
-        # Az API híváshoz csak az első évszámot használjuk (pl. 2024/2025 esetén 2024)
-        season_year = int(selected_season.split("/")[0])
-
-        try:
-            datetime.strptime(from_date, "%Y-%m-%d")  # Kezdő dátum formátum ellenőrzése
-            datetime.strptime(to_date, "%Y-%m-%d")  # Záró dátum formátum ellenőrzése
-        except ValueError:
-            messagebox.showerror("Hiba", "Kérlek, érvényes dátumformátumot adj meg (YYYY-MM-DD).")
-            return
-
-        league_id = self.leagues[self.league_combo.current()].get('id')
-        # A múltbéli mérkőzések lekérése
-        self.fixtures = get_fixtures(league_id, season_year, from_date=from_date, to_date=to_date, file_type="past")
-
-        self.show_fixtures_list()  # Töltsük be a mérkőzéseket
 
     def show_match_statistics(self, event=None):
         selected_item = self.results_tree.selection()
@@ -203,20 +195,17 @@ class PastResultsApp(tk.Frame):
         match_date = match_data[3]
         match_score = match_data[4]
 
-        # Dátum konvertálása budapesti időzónára
-        # Mivel a dátum már formázva van, nem tartalmaz időzónát, így az alábbi formátumot kell használni
-        utc_dt = datetime.strptime(match_date, "%Y-%m-%d %H:%M")  # A formázott dátum formátuma alapján
+        utc_dt = datetime.strptime(match_date, "%Y-%m-%d %H:%M")
         budapest_tz = pytz.timezone('Europe/Budapest')
         budapest_dt = utc_dt.astimezone(budapest_tz)
         formatted_date = budapest_dt.strftime("%Y-%m-%d %H:%M")
 
-        try:
-            statistics = get_match_statistics(match_id, league_name, home_team, away_team, formatted_date)
-        except Exception as e:
+        #try:
+        statistics = get_match_statistics(match_id, league_name, home_team, away_team, formatted_date)
+        """except Exception as e:
             messagebox.showerror("Hiba", f"Nem sikerült lekérni a statisztikákat: {str(e)}")
-            return
+            return"""
 
-        # Elrejtjük az összes fölösleges mezőt és feliratot
         self.league_label.pack_forget()
         self.league_combo.pack_forget()
         self.season_label.pack_forget()
@@ -229,26 +218,21 @@ class PastResultsApp(tk.Frame):
         self.fixtures_button.pack_forget()
         self.back_button.pack_forget()
 
-        # Új frame létrehozása a statisztikák és a mérkőzés információinak megjelenítéséhez
         self.stats_frame = tk.Frame(self)
         self.stats_frame.pack(fill='both', expand=True)
 
-        # Mérkőzés információk megjelenítése (liga, szezon, dátum, végeredmény)
         league_label = tk.Label(self.stats_frame, text=f"{league_name}", font=("Arial", 14))
         league_label.pack(pady=2)
 
         season_label = tk.Label(self.stats_frame, text=f"Szezon: {season}", font=("Arial", 14))
         season_label.pack(pady=2)
 
-        date_label = tk.Label(self.stats_frame, text=f"Mérkőzés dátuma: {formatted_date} ",
-                              font=("Arial", 14))
+        date_label = tk.Label(self.stats_frame, text=f"Mérkőzés dátuma: {formatted_date} ", font=("Arial", 14))
         date_label.pack(pady=2)
 
-        teams_label = tk.Label(self.stats_frame, text=f"{home_team} vs {away_team} - Eredmény: {match_score}",
-                               font=("Arial", 14))
+        teams_label = tk.Label(self.stats_frame, text=f"{home_team} vs {away_team} - Eredmény: {match_score}", font=("Arial", 14))
         teams_label.pack(pady=10)
 
-        # Statisztikák megjelenítése
         table_frame = tk.Frame(self.stats_frame)
         table_frame.pack(fill='both', expand=True)
 
@@ -287,16 +271,13 @@ class PastResultsApp(tk.Frame):
         else:
             stats_tree.insert("", "end", values=("Nincs adat", "N/A", "N/A"))
 
-        # Vissza gomb hozzáadása a mérkőzések listájához való visszatéréshez
         back_button = ttk.Button(self.stats_frame, text="Vissza", command=self.back_to_fixtures_list)
         back_button.pack(pady=10)
 
     def back_to_fixtures_list(self):
-        """Visszatér a mérkőzések listájához a statisztikák nézetéből."""
         if hasattr(self, 'stats_frame'):
             self.stats_frame.destroy()
 
-        # Újra megjelenítjük az összes mezőt
         self.league_label.pack(pady=10)
         self.league_combo.pack(pady=10)
         self.season_label.pack(pady=10)

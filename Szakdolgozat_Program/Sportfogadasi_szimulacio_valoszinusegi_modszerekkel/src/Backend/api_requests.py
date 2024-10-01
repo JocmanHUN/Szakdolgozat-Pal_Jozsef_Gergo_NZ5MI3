@@ -1,14 +1,23 @@
 # api_requests.py
 import requests
 import os
-import json
 from src.config import API_KEY, BASE_URL, HOST
-from src.Backend.helpersAPI import write_to_file, read_from_file, clear_file
+from src.Backend.helpersAPI import (
+    write_to_leagues, read_from_leagues,
+    write_to_teams, read_from_teams,
+    write_to_fixtures, read_from_fixtures,
+    write_to_match_statistics
+)
+
 def get_leagues():
     """
-    Ligák lekérése az API-ról és fájlba mentése.
+    Ligák lekérése az API-ról és adatbázisba mentése.
     :return: A ligák listája.
     """
+    leagues = read_from_leagues()
+    if leagues:  # Ha az adatbázisban már vannak ligák, akkor azokat használjuk
+        return leagues
+
     url = f"{BASE_URL}leagues"
     headers = {
         'x-apisports-key': API_KEY,
@@ -20,25 +29,30 @@ def get_leagues():
         data = response.json()
         leagues = [
             {
+                "id": league['league']['id'],
                 "name": league['league']['name'],
-                "country": league['country']['name'],
-                "id": league['league']['id']
+                "country": league['country']['name']
             }
             for league in data.get('response', []) if league['league'].get('id')
         ]
-        write_to_file(leagues, 'leagues.json')
+        write_to_leagues(leagues)  # Mentés az adatbázisba
         return leagues
     except requests.exceptions.RequestException as e:
         print(f"API hiba történt: {e}")
         return []
 
+
 def get_teams(league_id, season):
     """
-    Csapatok lekérése az API-ról és fájlba mentése.
+    Csapatok lekérése az API-ról és adatbázisba mentése.
     :param league_id: A liga azonosítója.
     :param season: A szezon éve.
     :return: A csapatok listája.
     """
+    teams = read_from_teams(league_id, season)
+    if teams:  # Ha az adatbázisban már vannak csapatok, akkor azokat használjuk
+        return teams
+
     url = f"{BASE_URL}teams"
     headers = {
         'x-apisports-key': API_KEY,
@@ -49,9 +63,6 @@ def get_teams(league_id, season):
         'season': season
     }
 
-    # A teams.json fájl törlése, ha létezik
-    clear_file('teams.json')
-
     try:
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()  # Hibakezelés HTTP hibákra
@@ -61,12 +72,13 @@ def get_teams(league_id, season):
                 "id": team['team']['id'],
                 "name": team['team']['name'],
                 "country": team['team']['country'],
-                "logo": team['team']['logo']
+                "logo": team['team']['logo'],
+                "league_id": league_id  # Liga azonosító hozzáadása
             }
             for team in data.get('response', [])
         ]
         if teams:
-            write_to_file(teams, 'teams.json')
+            write_to_teams(teams, league_id)  # Csapatok mentése az adatbázisba
         else:
             print("Nincsenek csapatok a megadott liga és szezon alapján.")
         return teams
@@ -74,23 +86,15 @@ def get_teams(league_id, season):
         print(f"API hiba történt: {e}")
         return []
 
-def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, status=None, timezone="Europe/Budapest", file_type="actual"):
-    """
-    Mérkőzések lekérése az API-ról és fájlba mentése.
-    :param league_id: A liga azonosítója.
-    :param season: A szezon éve (4 számjegyű).
-    :param from_date: Kezdő dátum (opcionális).
-    :param to_date: Záró dátum (opcionális).
-    :param team_id: Csapat azonosító (opcionális).
-    :param status: Mérkőzés státusz (opcionális).
-    :param timezone: Időzóna (alapértelmezett "Europe/Budapest").
-    :param file_type: Fájl típusa ("actual" vagy "past") a megfelelő fájl megnevezéshez.
-    :return: A mérkőzések listája.
-    """
-    filename = f"{file_type}_fixtures.json"
 
-    # Mindig töröljük a fájlt, mielőtt friss adatokat kérünk le
-    clear_file(filename)
+def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, status=None,
+                 timezone="Europe/Budapest"):
+    """
+    Mérkőzések lekérése az API-ról és adatbázisba mentése.
+    """
+    fixtures = read_from_fixtures(league_id, season, from_date, to_date)
+    if fixtures:
+        return fixtures
 
     url = f"{BASE_URL}fixtures"
     headers = {
@@ -99,7 +103,7 @@ def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, 
     }
     params = {
         'league': league_id,
-        'season': season,  # A szezon négyjegyű évszámként
+        'season': season,
         'timezone': timezone
     }
 
@@ -118,24 +122,29 @@ def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, 
         response.raise_for_status()  # Hibakezelés HTTP hibákra
         data = response.json()
 
-        # Ellenőrizzük, hogy van-e válasz és az tartalmaz mérkőzéseket
         if 'response' in data and data['response']:
             fixtures = [
                 {
                     "id": fixture['fixture']['id'],
                     "date": fixture['fixture']['date'],
-                    "home_team": fixture['teams']['home']['name'],
-                    "away_team": fixture['teams']['away']['name'],
-                    "status": fixture['fixture']['status']['short'],
-                    "score": fixture['score']['fulltime']
+                    "home_team_id": fixture['teams']['home']['id'],
+                    "home_team_name": fixture['teams']['home']['name'],
+                    "home_team_country": fixture['league'].get('country', 'Unknown'),  # Ország kezelése
+                    "home_team_logo": fixture['teams']['home']['logo'],
+                    "away_team_id": fixture['teams']['away']['id'],
+                    "away_team_name": fixture['teams']['away']['name'],
+                    "away_team_country": fixture['league'].get('country', 'Unknown'),  # Ország kezelése
+                    "away_team_logo": fixture['teams']['away']['logo'],
+                    "score_home": fixture['score']['fulltime']['home'] if fixture['score']['fulltime'][
+                                                                              'home'] is not None else 0,
+                    "score_away": fixture['score']['fulltime']['away'] if fixture['score']['fulltime'][
+                                                                              'away'] is not None else 0,
+                    "status": fixture['fixture']['status']['short']
                 }
                 for fixture in data.get('response', [])
             ]
             if fixtures:
-                write_to_file(fixtures, filename)  # Írd felül az új adatokkal
-                print(f"Sikeresen mentve a(z) {len(fixtures)} mérkőzés a {filename} fájlba.")
-            else:
-                print("Nincsenek mérkőzések a megadott paraméterek alapján.")
+                write_to_fixtures(fixtures)  # Mérkőzések mentése az adatbázisba
             return fixtures
         else:
             print("Az API nem adott vissza mérkőzéseket a megadott paraméterekkel.")
@@ -144,47 +153,16 @@ def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, 
         print(f"API hiba történt: {e}")
         return []
 
-def create_directory(path):
+def get_match_statistics(match_id, league_name, home_team_id, away_team_id, match_date):
     """
-    Létrehozza a mappát, ha nem létezik.
-    :param path: A mappa elérési útja.
-    """
-    try:
-        os.makedirs(path, exist_ok=True)
-        print(f"Mappa létrehozva: {path}")
-    except OSError as e:
-        print(f"Nem sikerült létrehozni a mappát: {path}, Hiba: {e}")
-
-
-def normalize_filename(filename):
-    # Helyettesíti az érvénytelen karaktereket és kisbetűsít mindent
-    return filename.replace(":", "-").replace("/", "-").replace("\\", "-").replace(" ", "_").lower()
-
-def get_match_statistics(match_id, league_name, home_team, away_team, match_date):
-    """
-    Lekéri a mérkőzés statisztikáit és fájlba menti a megfelelő mappastruktúrában.
+    Lekéri a mérkőzés statisztikáit és adatbázisba menti.
     :param match_id: A mérkőzés azonosítója
     :param league_name: A liga neve
-    :param home_team: Hazai csapat neve
-    :param away_team: Vendég csapat neve
+    :param home_team_id: Hazai csapat azonosítója
+    :param away_team_id: Vendég csapat azonosítója
     :param match_date: A mérkőzés dátuma (pl. "2022-08-07")
     :return: A mérkőzés statisztikái
     """
-    # Normálizált liga neve és fájl elérési útvonalak létrehozása
-    league_path = os.path.join("../statistics", normalize_filename(league_name))
-    os.makedirs(league_path, exist_ok=True)  # Mappa létrehozása, ha nem létezik
-
-    # Fájlnév generálása az év, hónap, nap formátumban a match_date alapján
-    match_date_formatted = match_date.split("T")[0]  # Csak az év, hónap, nap
-    filename = f"{home_team}_vs_{away_team}_{match_date_formatted}_statistics.json"
-    filepath = os.path.join(league_path, normalize_filename(filename))
-
-    # Ha a fájl már létezik, olvassuk be a statisztikákat
-    if os.path.exists(filepath):
-        print(f"Statisztikák betöltése fájlból: {filepath}")
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
-
     # API lekérdezés
     url = f"{BASE_URL}fixtures/statistics"
     headers = {
@@ -198,10 +176,10 @@ def get_match_statistics(match_id, league_name, home_team, away_team, match_date
         response.raise_for_status()  # Hibakezelés HTTP hibákra
         data = response.json().get('response', [])
 
-        # Statisztikák mentése fájlba
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        print(f"Statisztikák mentése fájlba: {filepath}")
+        # Statisztikák mentése az adatbázisba
+        if data:
+            write_to_match_statistics(data)
+            print(f"Statisztikák mentése adatbázisba: Mérkőzés ID {match_id}")
         return data
     except requests.exceptions.RequestException as e:
         print(f"Nem sikerült lekérni a statisztikákat: {e}")
@@ -234,8 +212,13 @@ def get_team_statistics(league_id, season, team_id, date=None):
     try:
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
-        return response.json().get('response', {})
+        data = response.json().get('response', {})
+
+        # Itt kezelheted a csapat statisztikák mentését az adatbázisba
+        # Például, ha az API válasz tartalmaz statisztikákat, akkor azt elmentheted:
+        # write_to_team_statistics(data)
+        # Az implementáció a konkrét API válasz struktúrájától függ
+        return data
     except requests.exceptions.RequestException as e:
         print(f"API hiba történt a csapat statisztikáinak lekérésekor: {e}")
         return {}
-
