@@ -18,39 +18,47 @@ class TeamsApp(tk.Frame):
 
         self.seasons = [f"{year}/{year+1}" for year in range(2024, 1999, -1)]  # Szezon kiválasztás listája
 
-        # Liga kiválasztása
-        self.league_label = ttk.Label(self, text="Válasszon ligát:")
-        self.league_label.pack(pady=10)
+        self.create_widgets()
 
-        self.league_combo = ttk.Combobox(self, values=self.league_names, state="readonly")
-        self.league_combo.set("Válasszon ligát...")  # Halvány háttérszöveg
-        self.league_combo.pack(pady=10)
+    def create_widgets(self):
+        # Konténerek
+        self.left_frame = tk.Frame(self)
+        self.left_frame.pack(side="left", fill="both", padx=10, pady=10, expand=True)
+
+        self.right_frame = tk.Frame(self)
+        self.right_frame.pack(side="right", fill="both", expand=True)
+
+        # Liga kiválasztása
+        self.league_label = ttk.Label(self.left_frame, text="Válasszon ligát:")
+        self.league_label.pack(pady=5, anchor="w")
+
+        self.league_combo = ttk.Combobox(self.left_frame, values=self.league_names, state="readonly")
+        self.league_combo.set("Válasszon ligát...")
+        self.league_combo.pack(pady=5, anchor="w", fill="x")
 
         # Szezon kiválasztása
-        self.season_label = ttk.Label(self, text="Válasszon szezont:")
-        self.season_label.pack(pady=10)
+        self.season_label = ttk.Label(self.left_frame, text="Válasszon szezont:")
+        self.season_label.pack(pady=5, anchor="w")
 
-        self.season_combo = ttk.Combobox(self, values=self.seasons, state="readonly")
-        self.season_combo.set("Válasszon szezont...")  # Halvány háttérszöveg
-        self.season_combo.pack(pady=10)
+        self.season_combo = ttk.Combobox(self.left_frame, values=self.seasons, state="readonly")
+        self.season_combo.set("Válasszon szezont...")
+        self.season_combo.pack(pady=5, anchor="w", fill="x")
 
-        # Gombok elhelyezése egy külön konténerben
-        self.button_frame = tk.Frame(self)
-        self.button_frame.pack(pady=10)
+        # Gombok
+        self.button_frame = tk.Frame(self.left_frame)
+        self.button_frame.pack(pady=10, anchor="w")
 
-        # Csapatok lekérése gomb középen
         self.teams_button = ttk.Button(self.button_frame, text="Csapatok lekérése", command=self.get_teams)
         self.teams_button.pack(side="left", padx=5)
 
-        # Vissza gomb középen
         self.back_button = ttk.Button(self.button_frame, text="Vissza", command=self.app.show_main_menu)
         self.back_button.pack(side="left", padx=5)
 
         # Görgethető canvas a csapatok megjelenítéséhez
-        self.canvas = tk.Canvas(self)
+        self.canvas = tk.Canvas(self.right_frame)
         self.canvas.pack(side="left", fill="both", expand=True)
 
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        scrollbar = ttk.Scrollbar(self.right_frame, orient="vertical", command=self.canvas.yview)
         scrollbar.pack(side="right", fill="y")
 
         self.canvas.configure(yscrollcommand=scrollbar.set)
@@ -72,7 +80,7 @@ class TeamsApp(tk.Frame):
             messagebox.showwarning("Hiányzó adatok", "Kérlek válassz egy ligát és egy szezont.")
             return
 
-        season_year = int(selected_season.split('/')[0])  # Csak az első évszámot használjuk
+        season_year = int(selected_season.split('/')[0])
         league_id = self.leagues[self.league_combo.current()].get('id')
 
         teams = get_teams(league_id, season_year)
@@ -99,12 +107,12 @@ class TeamsApp(tk.Frame):
                     response = requests.get(logo_url)
                     img_data = response.content
                     img = Image.open(BytesIO(img_data))
-                    img = img.resize((50, 50))  # Méretezzük át a képet 50x50 pixelesre
+                    img = img.resize((50, 50))
                     photo = ImageTk.PhotoImage(img)
 
                     # Hozzunk létre egy frame-et minden csapatnak
                     team_frame = tk.Frame(self.scrollable_frame)
-                    team_frame.pack(anchor="w", pady=5)
+                    team_frame.pack(anchor="w", pady=5, fill="x")
 
                     # Kép megjelenítése egy labelben
                     logo_label = tk.Label(team_frame, image=photo)
@@ -132,11 +140,8 @@ class TeamsApp(tk.Frame):
             self.stats_frame.destroy()
 
         # Töröljük a korábbi UI elemeket, hogy csak a csapat és statisztika jelenjen meg
-        self.league_label.pack_forget()
-        self.league_combo.pack_forget()
-        self.season_label.pack_forget()
-        self.season_combo.pack_forget()
-        self.button_frame.pack_forget()  # Eltüntetjük a gombokat
+        self.left_frame.pack_forget()
+        self.right_frame.pack_forget()
 
         if stats and selected_team:
             # Új frame létrehozása a statisztikák számára
@@ -154,11 +159,11 @@ class TeamsApp(tk.Frame):
                     response = requests.get(logo_url)
                     img_data = response.content
                     img = Image.open(BytesIO(img_data))
-                    img = img.resize((100, 100))  # Nagyobb méret a statisztikához
+                    img = img.resize((100, 100))
                     logo_photo = ImageTk.PhotoImage(img)
 
                     logo_label = tk.Label(header_frame, image=logo_photo)
-                    logo_label.image = logo_photo  # Megtartjuk a referenciát, hogy ne törlődjön
+                    logo_label.image = logo_photo
                     logo_label.pack(side="left", padx=10)
                 except Exception as e:
                     print(f"Nem sikerült betölteni a képet: {e}")
@@ -227,18 +232,8 @@ class TeamsApp(tk.Frame):
             self.stats_frame.destroy()
 
         # Újra megjelenítjük az eredeti UI elemeket
-        self.league_label.pack(pady=10)
-        self.league_combo.pack(pady=10)
-        self.season_label.pack(pady=10)
-        self.season_combo.pack(pady=10)
-
-        # Újra elhelyezzük a gombokat a helyükre
-        self.button_frame.pack(pady=10)
-        self.teams_button.pack(side="left", padx=5)
-        self.back_button.pack(side="left", padx=5)
-
-        # A csapat lista és scrollable frame megjelenítése
-        self.canvas.pack(side="left", fill="both", expand=True)
+        self.left_frame.pack(side="left", fill="both", padx=10, pady=10, expand=True)
+        self.right_frame.pack(side="right", fill="both", expand=True)
 
     def show_card_statistics(self, cards_frame, stats):
         if 'cards' in stats:
