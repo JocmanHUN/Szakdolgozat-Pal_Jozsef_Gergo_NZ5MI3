@@ -54,3 +54,4 @@ class MainMenu(tk.Frame):
 
         # Kilépés gomb
         exit_button = ttk.Button(self, text="Kilépés", command=self.app.root.destroy)
+        exit_button.pack(side="bottom", anchor="e", pady=10, padx=10)
