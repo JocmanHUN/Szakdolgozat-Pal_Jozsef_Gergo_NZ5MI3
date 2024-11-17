@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from src.Backend.api_requests import get_teams, get_team_statistics
-from src.Backend.helpersAPI import write_to_teams, read_from_teams
+from src.Backend.helpersAPI import write_to_teams, read_from_teams, read_from_cards, write_to_cards
 from src.Frontend.helpersGUI import save_leagues_if_not_exists
 from PIL import Image, ImageTk
 import requests
@@ -169,7 +169,8 @@ class TeamsApp(tk.Frame):
                     print(f"Nem sikerült betölteni a képet: {e}")
 
             # Csapat neve és szezon
-            team_info_label = tk.Label(header_frame, text=f"{selected_team['name']} - {season}/{season+1}", font=("Arial", 16))
+            team_info_label = tk.Label(header_frame, text=f"{selected_team['name']} - {season}/{season + 1}",
+                                       font=("Arial", 16))
             team_info_label.pack(side="left", padx=10)
 
             # Statisztikák megjelenítése notebookkal
@@ -210,16 +211,18 @@ class TeamsApp(tk.Frame):
             if 'goals' in stats:
                 goals = stats['goals']
                 goals_tree.insert("", "end", values=(
-                    "Scored", goals['for']['total']['home'], goals['for']['total']['away'], goals['for']['total']['total']))
+                    "Scored", goals['for']['total']['home'], goals['for']['total']['away'],
+                    goals['for']['total']['total']))
                 goals_tree.insert("", "end", values=(
-                    "Conceded", goals['against']['total']['home'], goals['against']['total']['away'], goals['against']['total']['total']))
+                    "Conceded", goals['against']['total']['home'], goals['against']['total']['away'],
+                    goals['against']['total']['total']))
 
             # Cards fül és tartalom
             cards_frame = ttk.Frame(notebook)
             notebook.add(cards_frame, text="Cards Statisztikák")
 
-            # Yellow és Red cards megjelenítése
-            self.show_card_statistics(cards_frame, stats)
+            # Directly call the card statistics function using team_id
+            self.show_card_statistics(cards_frame, stats, team_id)
 
             # Vissza gomb hozzáadása
             back_button = ttk.Button(self.stats_frame, text="Vissza", command=self.show_teams_screen)
@@ -235,9 +238,59 @@ class TeamsApp(tk.Frame):
         self.left_frame.pack(side="left", fill="both", padx=10, pady=10, expand=True)
         self.right_frame.pack(side="right", fill="both", expand=True)
 
-    def show_card_statistics(self, cards_frame, stats):
+    def show_card_statistics(self, cards_frame, stats, team_id):
+        # Ellenőrizzük, van-e 'cards' adat az API statisztikáiban
         if 'cards' in stats:
             cards = stats['cards']
+
+            # Nyomtatás a debugoláshoz
+            print("Kapott kártya adatok az API-tól:", cards)
+
+            # Ellenőrizzük, van-e már adat az adatbázisban
+            existing_cards = read_from_cards(team_id)
+
+            if not existing_cards:
+                # Ha nincs adat az adatbázisban, számítsuk ki a sárga és piros lapok összegét az API adatokból
+                yellow_total = sum(
+                    [cards['yellow'].get(interval, {}).get('total', 0) or 0 for interval in cards['yellow']])
+                red_total = sum([cards['red'].get(interval, {}).get('total', 0) or 0 for interval in cards['red']])
+
+                # Mentés az adatbázisba időintervallumok szerint
+                write_to_cards([{
+                    'yellow_cards': yellow_total,
+                    'red_cards': red_total,
+                    'yellow_cards_0_15': cards['yellow'].get('0-15', {}).get('total', 0),
+                    'yellow_cards_16_30': cards['yellow'].get('16-30', {}).get('total', 0),
+                    'yellow_cards_31_45': cards['yellow'].get('31-45', {}).get('total', 0),
+                    'yellow_cards_46_60': cards['yellow'].get('46-60', {}).get('total', 0),
+                    'yellow_cards_61_75': cards['yellow'].get('61-75', {}).get('total', 0),
+                    'yellow_cards_76_90': cards['yellow'].get('76-90', {}).get('total', 0),
+                    'yellow_cards_91_105': cards['yellow'].get('91-105', {}).get('total', 0),
+                    'yellow_cards_106_120': cards['yellow'].get('106-120', {}).get('total', 0),
+                    'red_cards_0_15': cards['red'].get('0-15', {}).get('total', 0),
+                    'red_cards_16_30': cards['red'].get('16-30', {}).get('total', 0),
+                    'red_cards_31_45': cards['red'].get('31-45', {}).get('total', 0),
+                    'red_cards_46_60': cards['red'].get('46-60', {}).get('total', 0),
+                    'red_cards_61_75': cards['red'].get('61-75', {}).get('total', 0),
+                    'red_cards_76_90': cards['red'].get('76-90', {}).get('total', 0),
+                    'red_cards_91_105': cards['red'].get('91-105', {}).get('total', 0),
+                    'red_cards_106_120': cards['red'].get('106-120', {}).get('total', 0)
+                }], team_id)
+            else:
+                # Ha van adat az adatbázisban, folytassuk csak akkor, ha van legalább egy elem
+                if len(existing_cards) > 0:
+                    # Összegzett adatokat lekérjük az adatbázisból
+                    yellow_total = sum([existing_cards[0].get(f'yellow_cards_{interval}', 0) or 0 for interval in
+                                        ['0_15', '16_30', '31_45', '46_60', '61_75', '76_90', '91_105', '106_120']])
+                    red_total = sum([existing_cards[0].get(f'red_cards_{interval}', 0) or 0 for interval in
+                                     ['0_15', '16_30', '31_45', '46_60', '61_75', '76_90', '91_105', '106_120']])
+                else:
+                    # Ha valamiért mégis üres, akkor az API-ból vegyük az adatokat
+                    yellow_total = sum(
+                        [cards['yellow'].get(interval, {}).get('total', 0) or 0 for interval in cards['yellow']])
+                    red_total = sum([cards['red'].get(interval, {}).get('total', 0) or 0 for interval in cards['red']])
+
+            # Kártyák megjelenítése GUI-ban
             intervals = ['0-15', '16-30', '31-45', '46-60', '61-75', '76-90', '91-105', '106-120']
 
             # Yellow Cards statisztika
@@ -247,17 +300,15 @@ class TeamsApp(tk.Frame):
             yellow_table_frame = tk.Frame(yellow_frame)
             yellow_table_frame.pack(fill='both', expand=True)
 
-            yellow_tree = ttk.Treeview(yellow_table_frame, columns=("Detail", "Home", "Away", "Total"), show="headings")
-            yellow_tree.heading("Detail", text="Részletek")
-            yellow_tree.heading("Home", text="Hazai")
-            yellow_tree.heading("Away", text="Vendég")
-            yellow_tree.heading("Total", text="Összesített")
+            yellow_tree = ttk.Treeview(yellow_table_frame, columns=("Interval", "Yellow Cards"), show="headings")
+            yellow_tree.heading("Interval", text="Időintervallum")
+            yellow_tree.heading("Yellow Cards", text="Sárga lapok")
             yellow_tree.pack(side="left", fill='both', expand=True)
 
-            # Görgetősáv hozzáadása a yellow_tree-hez
-            scrollbar_yellow = ttk.Scrollbar(yellow_table_frame, orient="vertical", command=yellow_tree.yview)
-            yellow_tree.configure(yscrollcommand=scrollbar_yellow.set)
-            scrollbar_yellow.pack(side="right", fill="y")
+            for interval in intervals:
+                yellow_cards = existing_cards[0].get(f'yellow_cards_{interval.replace("-", "_")}', 0) or 0 if len(
+                    existing_cards) > 0 else cards['yellow'].get(interval, {}).get('total', 0)
+                yellow_tree.insert("", "end", values=(interval, yellow_cards))
 
             # Red Cards statisztika
             red_frame = ttk.Frame(cards_frame)
@@ -266,48 +317,19 @@ class TeamsApp(tk.Frame):
             red_table_frame = tk.Frame(red_frame)
             red_table_frame.pack(fill='both', expand=True)
 
-            red_tree = ttk.Treeview(red_table_frame, columns=("Detail", "Home", "Away", "Total"), show="headings")
-            red_tree.heading("Detail", text="Részletek")
-            red_tree.heading("Home", text="Hazai")
-            red_tree.heading("Away", text="Vendég")
-            red_tree.heading("Total", text="Összesített")
+            red_tree = ttk.Treeview(red_table_frame, columns=("Interval", "Red Cards"), show="headings")
+            red_tree.heading("Interval", text="Időintervallum")
+            red_tree.heading("Red Cards", text="Piros lapok")
             red_tree.pack(side="left", fill='both', expand=True)
 
-            # Görgetősáv hozzáadása a red_tree-hez
-            scrollbar_red = ttk.Scrollbar(red_table_frame, orient="vertical", command=red_tree.yview)
-            red_tree.configure(yscrollcommand=scrollbar_red.set)
-            scrollbar_red.pack(side="right", fill="y")
-
-            total_yellow_home, total_yellow_away = 0, 0
-            total_red_home, total_red_away = 0, 0
-
             for interval in intervals:
-                yellow_cards_home = cards['yellow'].get(interval, {}).get('total', 0) or 0
-                yellow_cards_away = cards['yellow'].get(interval, {}).get('total', 0) or 0
-                red_cards_home = cards['red'].get(interval, {}).get('total', 0) or 0
-                red_cards_away = cards['red'].get(interval, {}).get('total', 0) or 0
+                red_cards = existing_cards[0].get(f'red_cards_{interval.replace("-", "_")}', 0) or 0 if len(
+                    existing_cards) > 0 else cards['red'].get(interval, {}).get('total', 0)
+                red_tree.insert("", "end", values=(interval, red_cards))
 
-                yellow_total = yellow_cards_home + yellow_cards_away
-                yellow_tree.insert("", "end", values=(
-                    f"Yellow Cards ({interval} mins)", yellow_cards_home, yellow_cards_away, yellow_total))
+            # Összesített kártyaadatok megjelenítése
+            yellow_tree.insert("", "end", values=("Összesített sárga lapok", yellow_total))
+            red_tree.insert("", "end", values=("Összesített piros lapok", red_total))
+            yellow_tree.insert("", "end", values=("Összesített lapok", yellow_total + red_total))
 
-                red_total = red_cards_home + red_cards_away
-                red_tree.insert("", "end", values=(
-                    f"Red Cards ({interval} mins)", red_cards_home, red_cards_away, red_total))
-
-                total_yellow_home += yellow_cards_home
-                total_yellow_away += yellow_cards_away
-                total_red_home += red_cards_home
-                total_red_away += red_cards_away
-
-            yellow_total_sum = total_yellow_home + total_yellow_away
-            red_total_sum = total_red_home + total_red_away
-
-            yellow_tree.insert("", "end", values=(
-                "Total Yellow Cards", total_yellow_home, total_yellow_away, yellow_total_sum))
-            red_tree.insert("", "end", values=("Total Red Cards", total_red_home, total_red_away, red_total_sum))
-
-            total_laps_home = total_yellow_home + total_red_home
-            total_laps_away = total_yellow_away + total_red_away
-            total_laps = total_laps_home + total_laps_away
-            yellow_tree.insert("", "end", values=("Total Cards", total_laps_home, total_laps_away, total_laps))
+           

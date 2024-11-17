@@ -104,16 +104,16 @@ def write_to_fixtures(data):
             home_team_id = fixture['home_team_id']
             away_team_id = fixture['away_team_id']
 
-            # Lekérjük a hazai és vendég csapat adatait
+            # Csapatok létezésének ellenőrzése vagy létrehozása
             get_or_create_team(home_team_id, fixture['home_team_name'], fixture['home_team_country'], fixture['home_team_logo'])
             get_or_create_team(away_team_id, fixture['away_team_name'], fixture['away_team_country'], fixture['away_team_logo'])
 
-            # Ha a csapatok már léteznek az adatbázisban, beszúrjuk a mérkőzést
+            # Mérkőzés beszúrása
             cursor.execute(query, (
                 fixture['id'],
                 fixture['date'],
-                fixture['home_team_id'],
-                fixture['away_team_id'],
+                home_team_id,
+                away_team_id,
                 fixture['score_home'],
                 fixture['score_away'],
                 fixture['status']
@@ -155,38 +155,117 @@ def read_from_fixtures(league_id, season, from_date=None, to_date=None):
         connection.close()
 
 # Match statistics handling
-def write_to_match_statistics(data):
+def write_to_match_statistics(fixture_id, team_id, statistics):
     connection = get_db_connection()
     if connection is None:
         return
 
     cursor = connection.cursor()
-    query = """
-        INSERT INTO match_statistics (id, fixture_id, team_id, type, value) 
-        VALUES (%s, %s, %s, %s, %s) 
-        ON DUPLICATE KEY UPDATE type=VALUES(type), value=VALUES(value)
-    """
-    try:
-        for stat in data:
-            # Ellenőrizzük, hogy a 'stat' tartalmazza-e az 'id' mezőt
-            stat_id = stat.get('id')
-            if not stat_id:
-                print(f"Hiányzó 'id' mező a statisztikában: {stat}")
-                continue  # Ha nincs 'id', akkor kihagyjuk ezt a statisztikát
 
-            cursor.execute(query, (
-                stat_id,
-                stat['fixture_id'],
-                stat['team_id'],
-                stat['type'],
-                stat['value']
-            ))
+    # SQL query az adatok beszúrásához vagy frissítéséhez
+    query = """
+        INSERT INTO match_statistics (
+            fixture_id, team_id, shots_on_goal, shots_off_goal, total_shots, 
+            blocked_shots, shots_insidebox, shots_outsidebox, fouls, corner_kicks, 
+            offsides, ball_possession, yellow_cards, red_cards, goalkeeper_saves, 
+            total_passes, passes_accurate, passes_percentage
+        ) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE 
+            shots_on_goal=VALUES(shots_on_goal), 
+            shots_off_goal=VALUES(shots_off_goal), 
+            total_shots=VALUES(total_shots), 
+            blocked_shots=VALUES(blocked_shots), 
+            shots_insidebox=VALUES(shots_insidebox), 
+            shots_outsidebox=VALUES(shots_outsidebox), 
+            fouls=VALUES(fouls), 
+            corner_kicks=VALUES(corner_kicks), 
+            offsides=VALUES(offsides), 
+            ball_possession=VALUES(ball_possession), 
+            yellow_cards=VALUES(yellow_cards), 
+            red_cards=VALUES(red_cards), 
+            goalkeeper_saves=VALUES(goalkeeper_saves), 
+            total_passes=VALUES(total_passes), 
+            passes_accurate=VALUES(passes_accurate), 
+            passes_percentage=VALUES(passes_percentage)
+    """
+
+    # Az API válasz alapján a megfelelő értékek kinyerése
+    data = {
+        'shots_on_goal': None,
+        'shots_off_goal': None,
+        'total_shots': None,
+        'blocked_shots': None,
+        'shots_insidebox': None,
+        'shots_outsidebox': None,
+        'fouls': None,
+        'corner_kicks': None,
+        'offsides': None,
+        'ball_possession': None,
+        'yellow_cards': None,
+        'red_cards': None,
+        'goalkeeper_saves': None,
+        'total_passes': None,
+        'passes_accurate': None,
+        'passes_percentage': None
+    }
+
+    # Adatok kitöltése a statisztikai típusok alapján
+    for stat in statistics:
+        stat_type = stat['type']
+        stat_value = stat['value']
+
+        if stat_type == 'Shots on Goal':
+            data['shots_on_goal'] = stat_value
+        elif stat_type == 'Shots off Goal':
+            data['shots_off_goal'] = stat_value
+        elif stat_type == 'Total Shots':
+            data['total_shots'] = stat_value
+        elif stat_type == 'Blocked Shots':
+            data['blocked_shots'] = stat_value
+        elif stat_type == 'Shots insidebox':
+            data['shots_insidebox'] = stat_value
+        elif stat_type == 'Shots outsidebox':
+            data['shots_outsidebox'] = stat_value
+        elif stat_type == 'Fouls':
+            data['fouls'] = stat_value
+        elif stat_type == 'Corner Kicks':
+            data['corner_kicks'] = stat_value
+        elif stat_type == 'Offsides':
+            data['offsides'] = stat_value
+        elif stat_type == 'Ball Possession':
+            data['ball_possession'] = stat_value
+        elif stat_type == 'Yellow Cards':
+            data['yellow_cards'] = stat_value
+        elif stat_type == 'Red Cards':
+            data['red_cards'] = stat_value
+        elif stat_type == 'Goalkeeper Saves':
+            data['goalkeeper_saves'] = stat_value
+        elif stat_type == 'Total passes':
+            data['total_passes'] = stat_value
+        elif stat_type == 'Passes accurate':
+            data['passes_accurate'] = stat_value
+        elif stat_type == 'Passes %':
+            data['passes_percentage'] = stat_value
+
+    try:
+        # Adatok beszúrása vagy frissítése az adatbázisba
+        cursor.execute(query, (
+            fixture_id, team_id,
+            data['shots_on_goal'], data['shots_off_goal'], data['total_shots'],
+            data['blocked_shots'], data['shots_insidebox'], data['shots_outsidebox'],
+            data['fouls'], data['corner_kicks'], data['offsides'],
+            data['ball_possession'], data['yellow_cards'], data['red_cards'],
+            data['goalkeeper_saves'], data['total_passes'], data['passes_accurate'],
+            data['passes_percentage']
+        ))
         connection.commit()
     except mysql.connector.Error as err:
-        print(f"Database write error for match statistics: {err}")
+        print(f"Adatbázis írási hiba: {err}")
     finally:
         cursor.close()
         connection.close()
+
 
 def read_from_match_statistics(fixture_id):
     connection = get_db_connection()
@@ -206,26 +285,37 @@ def read_from_match_statistics(fixture_id):
         cursor.close()
         connection.close()
 
-# Cards handling
-def write_to_cards(data):
+
+def write_to_cards(data, team_id):
     connection = get_db_connection()
     if connection is None:
         return
 
     cursor = connection.cursor()
     query = """
-        INSERT INTO cards (id, fixture_id, team_id, yellow_cards, red_cards) 
-        VALUES (%s, %s, %s, %s, %s) 
-        ON DUPLICATE KEY UPDATE yellow_cards=VALUES(yellow_cards), red_cards=VALUES(red_cards)
+        INSERT INTO cards (
+            team_id, yellow_cards, red_cards,
+            yellow_cards_0_15, yellow_cards_16_30, yellow_cards_31_45, yellow_cards_46_60, yellow_cards_61_75, yellow_cards_76_90, yellow_cards_91_105, yellow_cards_106_120,
+            red_cards_0_15, red_cards_16_30, red_cards_31_45, red_cards_46_60, red_cards_61_75, red_cards_76_90, red_cards_91_105, red_cards_106_120
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE 
+            yellow_cards=VALUES(yellow_cards), red_cards=VALUES(red_cards),
+            yellow_cards_0_15=VALUES(yellow_cards_0_15), yellow_cards_16_30=VALUES(yellow_cards_16_30), yellow_cards_31_45=VALUES(yellow_cards_31_45), 
+            yellow_cards_46_60=VALUES(yellow_cards_46_60), yellow_cards_61_75=VALUES(yellow_cards_61_75), yellow_cards_76_90=VALUES(yellow_cards_76_90), 
+            yellow_cards_91_105=VALUES(yellow_cards_91_105), yellow_cards_106_120=VALUES(yellow_cards_106_120),
+            red_cards_0_15=VALUES(red_cards_0_15), red_cards_16_30=VALUES(red_cards_16_30), red_cards_31_45=VALUES(red_cards_31_45), 
+            red_cards_46_60=VALUES(red_cards_46_60), red_cards_61_75=VALUES(red_cards_61_75), red_cards_76_90=VALUES(red_cards_76_90), 
+            red_cards_91_105=VALUES(red_cards_91_105), red_cards_106_120=VALUES(red_cards_106_120)
     """
     try:
         for card in data:
             cursor.execute(query, (
-                card['id'],
-                card['fixture_id'],
-                card['team_id'],
-                card['yellow_cards'],
-                card['red_cards']
+                team_id,
+                card['yellow_cards'], card['red_cards'],
+                card['yellow_cards_0_15'], card['yellow_cards_16_30'], card['yellow_cards_31_45'], card['yellow_cards_46_60'], card['yellow_cards_61_75'],
+                card['yellow_cards_76_90'], card['yellow_cards_91_105'], card['yellow_cards_106_120'],
+                card['red_cards_0_15'], card['red_cards_16_30'], card['red_cards_31_45'], card['red_cards_46_60'], card['red_cards_61_75'],
+                card['red_cards_76_90'], card['red_cards_91_105'], card['red_cards_106_120']
             ))
         connection.commit()
     except mysql.connector.Error as err:
@@ -234,15 +324,16 @@ def write_to_cards(data):
         cursor.close()
         connection.close()
 
-def read_from_cards(fixture_id):
+
+def read_from_cards(team_id):
     connection = get_db_connection()
     if connection is None:
         return []
 
     cursor = connection.cursor(dictionary=True)
     try:
-        query = "SELECT * FROM cards WHERE fixture_id = %s"
-        cursor.execute(query, (fixture_id,))
+        query = "SELECT * FROM cards WHERE team_id = %s"
+        cursor.execute(query, (team_id,))
         cards = cursor.fetchall()
         return cards
     except mysql.connector.Error as err:
@@ -327,3 +418,24 @@ def get_or_create_team(team_id, team_name, country, logo):
     else:
         print(f"Csapat már létezik: {team_name}")
 
+def get_team_id_by_name(team_name):
+    """Lekéri a csapat azonosítóját a neve alapján az adatbázisból."""
+    connection = get_db_connection()
+    if connection is None:
+        return None
+
+    cursor = connection.cursor()
+    try:
+        query = "SELECT id FROM teams WHERE name = %s"
+        cursor.execute(query, (team_name,))
+        result = cursor.fetchone()
+        if result:
+            return result[0]  # A csapat azonosítója
+        else:
+            return None  # Ha a csapat nem található
+    except mysql.connector.Error as err:
+        print(f"Database read error for team: {err}")
+        return None
+    finally:
+        cursor.close()
+        connection.close()

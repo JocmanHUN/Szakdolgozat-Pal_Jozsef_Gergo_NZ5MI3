@@ -6,7 +6,7 @@ from src.Backend.helpersAPI import (
     write_to_leagues, read_from_leagues,
     write_to_teams, read_from_teams,
     write_to_fixtures, read_from_fixtures,
-    write_to_match_statistics
+    write_to_match_statistics, read_from_match_statistics
 )
 
 def get_leagues():
@@ -153,17 +153,15 @@ def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, 
         print(f"API hiba történt: {e}")
         return []
 
-def get_match_statistics(match_id, league_name, home_team_id, away_team_id, match_date):
-    """
-    Lekéri a mérkőzés statisztikáit és adatbázisba menti.
-    :param match_id: A mérkőzés azonosítója
-    :param league_name: A liga neve
-    :param home_team_id: Hazai csapat azonosítója
-    :param away_team_id: Vendég csapat azonosítója
-    :param match_date: A mérkőzés dátuma (pl. "2022-08-07")
-    :return: A mérkőzés statisztikái
-    """
-    # API lekérdezés
+
+def get_match_statistics(match_id, league_name=None, home_team=None, away_team=None, formatted_date=None):
+    # Először ellenőrizzük az adatbázisban, hogy a statisztikák már léteznek-e
+    db_statistics = read_from_match_statistics(match_id)  # Ez a függvény lekéri az adatokat az adatbázisból
+    if db_statistics:
+        print("Statisztikák az adatbázisból:", db_statistics)
+        return db_statistics  # Ha vannak adatok, azokat visszaadjuk és nem kérünk le API-t
+
+    # Ha nincsenek statisztikai adatok az adatbázisban, API lekérést hajtunk végre
     url = f"{BASE_URL}fixtures/statistics"
     headers = {
         'x-apisports-key': API_KEY,
@@ -173,18 +171,26 @@ def get_match_statistics(match_id, league_name, home_team_id, away_team_id, matc
 
     try:
         response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()  # Hibakezelés HTTP hibákra
-        data = response.json().get('response', [])
+        response.raise_for_status()
 
-        # Statisztikák mentése az adatbázisba
-        if data:
-            write_to_match_statistics(data)
-            print(f"Statisztikák mentése adatbázisba: Mérkőzés ID {match_id}")
-        return data
+        # API válasz kiírása
+        data = response.json()
+        print("API válasz:", data)
+
+        statistics_data = data.get('response', [])
+
+        # Ha kaptunk adatot, elmentjük az adatbázisba
+        if statistics_data:
+            for team_stat in statistics_data:
+                team_id = team_stat['team']['id']
+                statistics = team_stat['statistics']
+                write_to_match_statistics(match_id, team_id, statistics)  # Elmentjük az adatokat
+
+        return statistics_data
+
     except requests.exceptions.RequestException as e:
-        print(f"Nem sikerült lekérni a statisztikákat: {e}")
-        raise e
-
+        print(f"API hiba történt: {e}")
+        return []
 
 def get_team_statistics(league_id, season, team_id, date=None):
     """
