@@ -239,24 +239,46 @@ class TeamsApp(tk.Frame):
         self.right_frame.pack(side="right", fill="both", expand=True)
 
     def show_card_statistics(self, cards_frame, stats, team_id):
+        # Hozzunk létre egy Canvas-t a görgetéshez
+        canvas = tk.Canvas(cards_frame)
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # Görgetősáv hozzáadása
+        scrollbar = ttk.Scrollbar(cards_frame, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Görgethető tartalom terület
+        scrollable_frame = tk.Frame(canvas)
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
         # Ellenőrizzük, van-e 'cards' adat az API statisztikáiban
         if 'cards' in stats:
             cards = stats['cards']
 
-            # Nyomtatás a debugoláshoz
-            print("Kapott kártya adatok az API-tól:", cards)
+            # Szezon meghatározása a GUI-ból
+            season = self.season_combo.get().split('/')[0]  # Példa: "2020/21" -> "2020"
 
             # Ellenőrizzük, van-e már adat az adatbázisban
-            existing_cards = read_from_cards(team_id)
+            existing_cards = read_from_cards(team_id, season)  # Szezon hozzáadása az ellenőrzéshez
 
             if not existing_cards:
-                # Ha nincs adat az adatbázisban, számítsuk ki a sárga és piros lapok összegét az API adatokból
+                # Ha nincs adat az adatbázisban, az API-ból kapott adatok mentése
                 yellow_total = sum(
-                    [cards['yellow'].get(interval, {}).get('total', 0) or 0 for interval in cards['yellow']])
-                red_total = sum([cards['red'].get(interval, {}).get('total', 0) or 0 for interval in cards['red']])
+                    [cards['yellow'].get(interval, {}).get('total', 0) or 0 for interval in cards['yellow']]
+                )
+                red_total = sum(
+                    [cards['red'].get(interval, {}).get('total', 0) or 0 for interval in cards['red']]
+                )
 
-                # Mentés az adatbázisba időintervallumok szerint
-                write_to_cards([{
+                # Mentendő adat összeállítása
+                card_data = {
+                    'team_id': team_id,
+                    'season': season,
                     'yellow_cards': yellow_total,
                     'red_cards': red_total,
                     'yellow_cards_0_15': cards['yellow'].get('0-15', {}).get('total', 0),
@@ -274,28 +296,40 @@ class TeamsApp(tk.Frame):
                     'red_cards_61_75': cards['red'].get('61-75', {}).get('total', 0),
                     'red_cards_76_90': cards['red'].get('76-90', {}).get('total', 0),
                     'red_cards_91_105': cards['red'].get('91-105', {}).get('total', 0),
-                    'red_cards_106_120': cards['red'].get('106-120', {}).get('total', 0)
-                }], team_id)
-            else:
-                # Ha van adat az adatbázisban, folytassuk csak akkor, ha van legalább egy elem
-                if len(existing_cards) > 0:
-                    # Összegzett adatokat lekérjük az adatbázisból
-                    yellow_total = sum([existing_cards[0].get(f'yellow_cards_{interval}', 0) or 0 for interval in
-                                        ['0_15', '16_30', '31_45', '46_60', '61_75', '76_90', '91_105', '106_120']])
-                    red_total = sum([existing_cards[0].get(f'red_cards_{interval}', 0) or 0 for interval in
-                                     ['0_15', '16_30', '31_45', '46_60', '61_75', '76_90', '91_105', '106_120']])
-                else:
-                    # Ha valamiért mégis üres, akkor az API-ból vegyük az adatokat
-                    yellow_total = sum(
-                        [cards['yellow'].get(interval, {}).get('total', 0) or 0 for interval in cards['yellow']])
-                    red_total = sum([cards['red'].get(interval, {}).get('total', 0) or 0 for interval in cards['red']])
+                    'red_cards_106_120': cards['red'].get('106-120', {}).get('total', 0),
+                }
+                write_to_cards(card_data, team_id, season)  # Mentés az adatbázisba
 
-            # Kártyák megjelenítése GUI-ban
-            intervals = ['0-15', '16-30', '31-45', '46-60', '61-75', '76-90', '91-105', '106-120']
+                # Frissen mentett adatokat újra lekérjük
+                existing_cards = read_from_cards(team_id, season)
+
+            # Összesített lapok kiszámítása
+            yellow_total = sum([
+                existing_cards[0].get(f'yellow_cards_{interval}', 0) or 0
+                for interval in ['0_15', '16_30', '31_45', '46_60', '61_75', '76_90', '91_105', '106_120']
+            ])
+            red_total = sum([
+                existing_cards[0].get(f'red_cards_{interval}', 0) or 0
+                for interval in ['0_15', '16_30', '31_45', '46_60', '61_75', '76_90', '91_105', '106_120']
+            ])
+            total_cards = yellow_total + red_total
+
+            # GUI komponensek frissítése
+            summary_label = tk.Label(scrollable_frame, text=f"Összesített lapok száma: {total_cards}",
+                                     font=("Arial", 16, "bold"))
+            summary_label.pack(pady=10)
+
+            # Fő frame a táblázatok egymás mellé helyezéséhez
+            tables_frame = tk.Frame(scrollable_frame)
+            tables_frame.pack(pady=10, fill='both', expand=True)
 
             # Yellow Cards statisztika
-            yellow_frame = ttk.Frame(cards_frame)
-            yellow_frame.pack(pady=10, fill='both', expand=True)
+            yellow_frame = ttk.LabelFrame(tables_frame, text="Sárga lapok statisztikák")
+            yellow_frame.pack(side="left", padx=10, fill='both', expand=True)
+
+            yellow_summary_label = tk.Label(yellow_frame, text=f"Összes sárga lap: {yellow_total}",
+                                            font=("Arial", 14, "bold"))
+            yellow_summary_label.pack(pady=5)
 
             yellow_table_frame = tk.Frame(yellow_frame)
             yellow_table_frame.pack(fill='both', expand=True)
@@ -305,14 +339,18 @@ class TeamsApp(tk.Frame):
             yellow_tree.heading("Yellow Cards", text="Sárga lapok")
             yellow_tree.pack(side="left", fill='both', expand=True)
 
+            intervals = ['0-15', '16-30', '31-45', '46-60', '61-75', '76-90', '91-105', '106-120']
             for interval in intervals:
                 yellow_cards = existing_cards[0].get(f'yellow_cards_{interval.replace("-", "_")}', 0) or 0 if len(
                     existing_cards) > 0 else cards['yellow'].get(interval, {}).get('total', 0)
                 yellow_tree.insert("", "end", values=(interval, yellow_cards))
 
             # Red Cards statisztika
-            red_frame = ttk.Frame(cards_frame)
-            red_frame.pack(pady=10, fill='both', expand=True)
+            red_frame = ttk.LabelFrame(tables_frame, text="Piros lapok statisztikák")
+            red_frame.pack(side="left", padx=10, fill='both', expand=True)
+
+            red_summary_label = tk.Label(red_frame, text=f"Összes piros lap: {red_total}", font=("Arial", 14, "bold"))
+            red_summary_label.pack(pady=5)
 
             red_table_frame = tk.Frame(red_frame)
             red_table_frame.pack(fill='both', expand=True)
@@ -326,10 +364,5 @@ class TeamsApp(tk.Frame):
                 red_cards = existing_cards[0].get(f'red_cards_{interval.replace("-", "_")}', 0) or 0 if len(
                     existing_cards) > 0 else cards['red'].get(interval, {}).get('total', 0)
                 red_tree.insert("", "end", values=(interval, red_cards))
-
-            # Összesített kártyaadatok megjelenítése
-            yellow_tree.insert("", "end", values=("Összesített sárga lapok", yellow_total))
-            red_tree.insert("", "end", values=("Összesített piros lapok", red_total))
-            yellow_tree.insert("", "end", values=("Összesített lapok", yellow_total + red_total))
 
            

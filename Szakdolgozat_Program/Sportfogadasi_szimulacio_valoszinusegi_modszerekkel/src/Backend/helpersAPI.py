@@ -286,7 +286,7 @@ def read_from_match_statistics(fixture_id):
         connection.close()
 
 
-def write_to_cards(data, team_id):
+def write_to_cards(data, team_id, season):
     connection = get_db_connection()
     if connection is None:
         return
@@ -294,10 +294,10 @@ def write_to_cards(data, team_id):
     cursor = connection.cursor()
     query = """
         INSERT INTO cards (
-            team_id, yellow_cards, red_cards,
+            team_id, season, yellow_cards, red_cards,
             yellow_cards_0_15, yellow_cards_16_30, yellow_cards_31_45, yellow_cards_46_60, yellow_cards_61_75, yellow_cards_76_90, yellow_cards_91_105, yellow_cards_106_120,
             red_cards_0_15, red_cards_16_30, red_cards_31_45, red_cards_46_60, red_cards_61_75, red_cards_76_90, red_cards_91_105, red_cards_106_120
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE 
             yellow_cards=VALUES(yellow_cards), red_cards=VALUES(red_cards),
             yellow_cards_0_15=VALUES(yellow_cards_0_15), yellow_cards_16_30=VALUES(yellow_cards_16_30), yellow_cards_31_45=VALUES(yellow_cards_31_45), 
@@ -308,82 +308,38 @@ def write_to_cards(data, team_id):
             red_cards_91_105=VALUES(red_cards_91_105), red_cards_106_120=VALUES(red_cards_106_120)
     """
     try:
-        for card in data:
-            cursor.execute(query, (
-                team_id,
-                card['yellow_cards'], card['red_cards'],
-                card['yellow_cards_0_15'], card['yellow_cards_16_30'], card['yellow_cards_31_45'], card['yellow_cards_46_60'], card['yellow_cards_61_75'],
-                card['yellow_cards_76_90'], card['yellow_cards_91_105'], card['yellow_cards_106_120'],
-                card['red_cards_0_15'], card['red_cards_16_30'], card['red_cards_31_45'], card['red_cards_46_60'], card['red_cards_61_75'],
-                card['red_cards_76_90'], card['red_cards_91_105'], card['red_cards_106_120']
-            ))
+        cursor.execute(query, (
+            team_id, season,
+            data['yellow_cards'], data['red_cards'],
+            data['yellow_cards_0_15'], data['yellow_cards_16_30'], data['yellow_cards_31_45'],
+            data['yellow_cards_46_60'], data['yellow_cards_61_75'],
+            data['yellow_cards_76_90'], data['yellow_cards_91_105'], data['yellow_cards_106_120'],
+            data['red_cards_0_15'], data['red_cards_16_30'], data['red_cards_31_45'], data['red_cards_46_60'],
+            data['red_cards_61_75'],
+            data['red_cards_76_90'], data['red_cards_91_105'], data['red_cards_106_120']
+        ))
         connection.commit()
     except mysql.connector.Error as err:
-        print(f"Database write error for cards: {err}")
+        print(f"Adatbázis írási hiba: {err}")
+        print(f"Adatok: {data}, Csapat ID: {team_id}, Szezon: {season}")
     finally:
         cursor.close()
         connection.close()
 
 
-def read_from_cards(team_id):
+def read_from_cards(team_id, season):
     connection = get_db_connection()
     if connection is None:
         return []
 
     cursor = connection.cursor(dictionary=True)
     try:
-        query = "SELECT * FROM cards WHERE team_id = %s"
-        cursor.execute(query, (team_id,))
+        query = "SELECT * FROM cards WHERE team_id = %s AND season = %s"
+        cursor.execute(query, (team_id, season))
         cards = cursor.fetchall()
         return cards
     except mysql.connector.Error as err:
         print(f"Database read error for cards: {err}")
-        return []
-    finally:
-        cursor.close()
-        connection.close()
-
-# Goals handling
-def write_to_goals(data):
-    connection = get_db_connection()
-    if connection is None:
-        return
-
-    cursor = connection.cursor()
-    query = """
-        INSERT INTO goals (id, fixture_id, team_id, goals_for, goals_against) 
-        VALUES (%s, %s, %s, %s, %s) 
-        ON DUPLICATE KEY UPDATE goals_for=VALUES(goals_for), goals_against=VALUES(goals_against)
-    """
-    try:
-        for goal in data:
-            cursor.execute(query, (
-                goal['id'],
-                goal['fixture_id'],
-                goal['team_id'],
-                goal['goals_for'],
-                goal['goals_against']
-            ))
-        connection.commit()
-    except mysql.connector.Error as err:
-        print(f"Database write error for goals: {err}")
-    finally:
-        cursor.close()
-        connection.close()
-
-def read_from_goals(fixture_id):
-    connection = get_db_connection()
-    if connection is None:
-        return []
-
-    cursor = connection.cursor(dictionary=True)
-    try:
-        query = "SELECT * FROM goals WHERE fixture_id = %s"
-        cursor.execute(query, (fixture_id,))
-        goals = cursor.fetchall()
-        return goals
-    except mysql.connector.Error as err:
-        print(f"Database read error for goals: {err}")
         return []
     finally:
         cursor.close()
