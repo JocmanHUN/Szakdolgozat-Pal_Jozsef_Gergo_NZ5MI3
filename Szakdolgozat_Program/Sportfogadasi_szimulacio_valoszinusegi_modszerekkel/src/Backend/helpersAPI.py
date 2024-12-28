@@ -395,3 +395,173 @@ def get_team_id_by_name(team_name):
     finally:
         cursor.close()
         connection.close()
+
+def write_to_odds(odds_data):
+    """
+    Elmenti az oddsokat az adatbázisba.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return
+
+    cursor = connection.cursor()
+    query = """
+        INSERT INTO odds (fixture_id, bookmaker_id, home_odds, draw_odds, away_odds, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            home_odds = VALUES(home_odds),
+            draw_odds = VALUES(draw_odds),
+            away_odds = VALUES(away_odds),
+            updated_at = VALUES(updated_at)
+    """
+    try:
+        for odd in odds_data:
+            cursor.execute(query, (
+                odd["fixture_id"],
+                odd["bookmaker_id"],
+                odd["home_odds"],
+                odd["draw_odds"],
+                odd["away_odds"],
+                odd["updated_at"]
+            ))
+        connection.commit()
+        print(f"{len(odds_data)} odds mentve.")
+    except mysql.connector.Error as err:
+        print(f"Database write error for odds: {err}")
+    finally:
+        cursor.close()
+        connection.close()
+
+def read_odds_by_fixture(fixture_id):
+    connection = get_db_connection()
+    if connection is None:
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+    query = "SELECT * FROM odds WHERE fixture_id = %s"
+    try:
+        cursor.execute(query, (fixture_id,))
+        return cursor.fetchall()
+    except mysql.connector.Error as err:
+        print(f"Database read error for odds: {err}")
+        return []
+    finally:
+        cursor.close()
+        connection.close()
+
+def get_pre_match_fixtures_with_odds():
+    """
+    Lekérdezi az adatbázisból a pre-match mérkőzéseket és a hozzájuk tartozó oddsokat.
+    :return: Lista a mérkőzésekről és oddsokról.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+    query = """
+        SELECT 
+            f.id AS fixture_id,
+            t1.name AS home_team,
+            t2.name AS away_team,
+            f.date AS match_date,
+            o.home_odds,
+            o.draw_odds,
+            o.away_odds
+        FROM fixtures f
+        JOIN teams t1 ON f.home_team_id = t1.id
+        JOIN teams t2 ON f.away_team_id = t2.id
+        LEFT JOIN odds o ON f.id = o.fixture_id
+        WHERE f.status = 'NS'
+    """
+    try:
+        cursor.execute(query)
+        return cursor.fetchall()
+    except mysql.connector.Error as err:
+        print(f"Error fetching fixtures with odds: {err}")
+        return []
+    finally:
+        cursor.close()
+        connection.close()
+def get_odds_by_fixture_id(fixture_id):
+    """
+    Lekérdezi az oddsokat egy adott mérkőzéshez az adatbázisból.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+    query = """
+        SELECT b.name AS bookmaker, o.home_odds, o.draw_odds, o.away_odds
+        FROM odds o
+        JOIN bookmakers b ON o.bookmaker_id = b.id
+        WHERE o.fixture_id = %s
+    """
+    try:
+        cursor.execute(query, (fixture_id,))
+        return cursor.fetchall()
+    except mysql.connector.Error as err:
+        print(f"Database read error for odds: {err}")
+        return []
+    finally:
+        cursor.close()
+        connection.close()
+
+def get_pre_match_fixtures():
+    """
+    Lekérdezi az adatbázisból az összes pre-match (NS státuszú) mérkőzést.
+    :return: A mérkőzések listája.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+    try:
+        query = """
+            SELECT 
+                fixtures.id AS fixture_id,
+                fixtures.date AS match_date,
+                home_team.name AS home_team,
+                away_team.name AS away_team
+            FROM fixtures
+            LEFT JOIN teams AS home_team ON fixtures.home_team_id = home_team.id
+            LEFT JOIN teams AS away_team ON fixtures.away_team_id = away_team.id
+            WHERE fixtures.status = 'NS'
+        """
+        cursor.execute(query)
+        fixtures = cursor.fetchall()
+        return fixtures
+    except mysql.connector.Error as err:
+        print(f"Database read error for fixtures: {err}")
+        return []
+    finally:
+        cursor.close()
+        connection.close()
+
+def save_bookmakers(bookmakers):
+    """
+    Elmenti a fogadóirodák adatait az adatbázisba.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return
+
+    cursor = connection.cursor()
+    query = """
+        INSERT INTO bookmakers (id, name)
+        VALUES (%s, %s)
+        ON DUPLICATE KEY UPDATE name = VALUES(name)
+    """
+    try:
+        for bookmaker_id, bookmaker_name in bookmakers.items():
+            cursor.execute(query, (bookmaker_id, bookmaker_name))
+        connection.commit()
+        print(f"{len(bookmakers)} fogadóiroda mentve az adatbázisba.")
+    except mysql.connector.Error as err:
+        print(f"Database write error for bookmakers: {err}")
+    finally:
+        cursor.close()
+        connection.close()
+

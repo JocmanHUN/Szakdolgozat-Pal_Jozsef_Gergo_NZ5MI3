@@ -1,4 +1,6 @@
 # api_requests.py
+from datetime import datetime, timedelta
+
 import requests
 import os
 from src.config import API_KEY, BASE_URL, HOST
@@ -6,7 +8,7 @@ from src.Backend.helpersAPI import (
     write_to_leagues, read_from_leagues,
     write_to_teams, read_from_teams,
     write_to_fixtures, read_from_fixtures,
-    write_to_match_statistics, read_from_match_statistics
+    write_to_match_statistics, read_from_match_statistics, write_to_odds, get_odds_by_fixture_id, save_bookmakers
 )
 
 def get_leagues():
@@ -228,3 +230,144 @@ def get_team_statistics(league_id, season, team_id, date=None):
     except requests.exceptions.RequestException as e:
         print(f"API hiba történt a csapat statisztikáinak lekérésekor: {e}")
         return {}
+
+def fetch_pre_match_fixtures(league_id, season):
+    """
+    Lekéri az aktuális pre-match (NS státuszú) mérkőzéseket az API-ból.
+    :param league_id: Liga azonosítója.
+    :param season: Szezon éve.
+    :return: Mérkőzések listája az API válaszából.
+    """
+    url = f"{BASE_URL}fixtures"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {
+        'league': league_id,
+        'season': season,
+        'status': 'NS',  # Csak a Not Started mérkőzések
+        'timezone': 'Europe/Budapest'
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+        print(f"API válasz: {data}")  # Debug: az API válasz kiírása
+        return data.get('response', [])
+    except requests.exceptions.RequestException as e:
+        print(f"API hiba a pre-match mérkőzések lekérdezésekor: {e}")
+        return []
+
+def fetch_odds_for_fixture(fixture_id):
+    """
+    Lekéri az oddsokat egy adott mérkőzéshez.
+    :param fixture_id: A mérkőzés azonosítója.
+    :return: Odds adatok az API válaszából.
+    """
+    url = f"{BASE_URL}odds"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {
+        'fixture': fixture_id
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+        return data.get('response', [])
+    except requests.exceptions.RequestException as e:
+        print(f"API hiba az oddsok lekérdezésekor: {e}")
+        return []
+
+def save_pre_match_fixtures():
+    """
+    Lekéri az API-ból az összes NS státuszú mérkőzést, és csak a mérkőzés adatokat menti az adatbázisba.
+    """
+    url = f"{BASE_URL}fixtures"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {
+        'status': 'NS',
+        'timezone': 'Europe/Budapest',
+        'date': get_tomorrow_date()
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        fixtures = response.json().get('response', [])
+
+        for fixture in fixtures:
+            fixture_data = {
+                "id": fixture["fixture"]["id"],
+                "date": fixture["fixture"]["date"],
+                "home_team_id": fixture["teams"]["home"]["id"],
+                "home_team_name": fixture["teams"]["home"]["name"],
+                "home_team_country": fixture["league"].get("country", "Unknown"),
+                "home_team_logo": fixture["teams"]["home"]["logo"],
+                "away_team_id": fixture["teams"]["away"]["id"],
+                "away_team_name": fixture["teams"]["away"]["name"],
+                "away_team_country": fixture["league"].get("country", "Unknown"),
+                "away_team_logo": fixture["teams"]["away"]["logo"],
+                "score_home": None,
+                "score_away": None,
+                "status": "NS",
+            }
+            write_to_fixtures([fixture_data])
+        print(f"{len(fixtures)} mérkőzés mentve.")
+    except requests.exceptions.RequestException as e:
+        print(f"API hiba történt: {e}")
+
+
+def get_tomorrow_date():
+    """Visszaadja a holnapi dátumot YYYY-MM-DD formátumban."""
+    tomorrow = datetime.now() + timedelta(days=1)
+    return tomorrow.strftime('%Y-%m-%d')
+
+def fetch_bookmakers_from_odds(odds_response):
+    """
+    Lekéri a fogadóirodák adatait az odds válaszból.
+    """
+    bookmakers = {}
+    for response in odds_response:
+        for bookmaker in response.get("bookmakers", []):
+            bookmakers[bookmaker["id"]] = bookmaker["name"]
+    return bookmakers
+
+def save_odds_for_fixture(fixture_id):
+    """
+    Lekéri és menti az oddsokat egy adott mérkőzéshez, csak a végkimenetelt kezelve.
+    """
+    existing_odds = get_odds_by_fixture_id(fixture_id)
+    if existing_odds:
+        print(f"Odds már létezik az adatbázisban: {fixture_id}")
+        return
+
+    # Oddsok lekérdezése az API-ból
+    odds = fetch_odds_for_fixture(fixture_id)
+    if not odds:
+        print(f"Nincs odds a mérkőzéshez: {fixture_id}")
+        return
+
+    # Csak a "Match Winner" oddsok mentése
+    odds_to_save = []
+    for bookmaker in odds[0]["bookmakers"]:
+        for bet in bookmaker["bets"]:
+            if bet["name"] == "Match Winner":  # Csak a "Match Winner" típusú oddsokat kezeljük
+                odds_to_save.append({
+                    "fixture_id": fixture_id,
+                    "bookmaker_id": bookmaker["id"],
+                    "home_odds": bet["values"][0]["odd"],
+                    "draw_odds": bet["values"][1]["odd"],
+                    "away_odds": bet["values"][2]["odd"],
+                    "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                })
+    write_to_odds(odds_to_save)
+    print(f"Odds mentve a mérkőzéshez: {fixture_id}")
