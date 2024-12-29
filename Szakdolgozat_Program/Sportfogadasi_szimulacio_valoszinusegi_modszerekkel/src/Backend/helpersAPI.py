@@ -1,5 +1,8 @@
 import mysql.connector
-from src.config import DB_CONFIG
+import requests
+
+from src.config import DB_CONFIG, BASE_URL, API_KEY, HOST
+
 
 def get_db_connection():
     """Establishes the database connection."""
@@ -565,3 +568,76 @@ def save_bookmakers(bookmakers):
         cursor.close()
         connection.close()
 
+def update_fixtures_status():
+    """
+    Frissíti az adatbázisban lévő mérkőzések státuszát és egyéb mezőit az API válaszai alapján,
+    csak ha valóban változás történt.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("Nem sikerült csatlakozni az adatbázishoz.")
+        return
+
+    cursor = connection.cursor(dictionary=True)
+    try:
+        # Lekérdezzük az adatbázisból az összes `NS` státuszú mérkőzést
+        query = "SELECT id, status, date, score_home, score_away FROM fixtures WHERE status = 'NS'"
+        cursor.execute(query)
+        fixtures = cursor.fetchall()
+
+        for fixture in fixtures:
+            fixture_id = fixture["id"]
+
+            # API lekérdezés a mérkőzés adataiért
+            url = f"{BASE_URL}fixtures"
+            headers = {
+                'x-apisports-key': API_KEY,
+                'x-rapidapi-host': HOST
+            }
+            params = {'id': fixture_id}
+
+            try:
+                response = requests.get(url, headers=headers, params=params)
+                response.raise_for_status()
+                data = response.json().get("response", [{}])[0]
+
+                # Kinyerjük az adatokat az API válaszból
+                new_status = data["fixture"]["status"]["short"]
+                new_date = data["fixture"]["date"]
+                home_score = data["score"]["fulltime"]["home"]
+                away_score = data["score"]["fulltime"]["away"]
+
+                # Csak akkor frissítünk, ha változás történt
+                if (
+                    fixture["status"] != new_status or
+                    fixture["date"] != new_date or
+                    fixture["score_home"] != home_score or
+                    fixture["score_away"] != away_score
+                ):
+                    update_query = """
+                        UPDATE fixtures
+                        SET 
+                            status = %s,
+                            date = %s,
+                            score_home = %s,
+                            score_away = %s
+                        WHERE id = %s
+                    """
+                    cursor.execute(update_query, (
+                        new_status,
+                        new_date,
+                        home_score,
+                        away_score,
+                        fixture_id
+                    ))
+                    connection.commit()
+                    print(f"Mérkőzés frissítve: {fixture_id}, státusz: {new_status}")
+
+            except requests.exceptions.RequestException as e:
+                print(f"API hiba a mérkőzés frissítésekor ({fixture_id}): {e}")
+
+    except mysql.connector.Error as err:
+        print(f"Adatbázis hiba a mérkőzések frissítésekor: {err}")
+    finally:
+        cursor.close()
+        connection.close()

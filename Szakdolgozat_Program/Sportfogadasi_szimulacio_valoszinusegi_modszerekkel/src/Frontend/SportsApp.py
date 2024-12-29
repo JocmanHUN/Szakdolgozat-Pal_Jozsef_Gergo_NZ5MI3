@@ -1,9 +1,13 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from src.Frontend.PastResultsApp import PastResultsApp
 from src.Frontend.TeamsApp import TeamsApp
-from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id
+from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id, update_fixtures_status
 from src.Backend.api_requests import save_pre_match_fixtures, save_odds_for_fixture
+
+# Globális lista a kiválasztott mérkőzésekhez
+selected_fixtures = []
+selected_window = None  # Egyetlen példányban tartjuk a kiválasztott mérkőzések ablakát
 
 class SportsApp:
     def __init__(self, root):
@@ -13,6 +17,8 @@ class SportsApp:
         # Minimális és maximális méret beállítása
         self.root.minsize(800, 600)  # Minimális méret 800x600
         self.root.maxsize(1200, 900)  # Maximális méret 1200x900
+
+        update_fixtures_status()
 
         self.current_frame = None
         self.show_main_menu()
@@ -40,6 +46,7 @@ class MainMenu(tk.Frame):
     def __init__(self, app):
         super().__init__(app.root)
         self.app = app
+
         # Adatok mentése (csak mérkőzések, odds nélkül)
         print("NS státuszú mérkőzések mentése...")
         save_pre_match_fixtures()
@@ -89,7 +96,7 @@ class MainMenu(tk.Frame):
         if fixtures:
             for row in fixtures:
                 self.treeview.insert("", "end", values=(
-                    row["fixture_id"],  # Javított kulcsnév
+                    row["fixture_id"],
                     row["home_team"],
                     row["away_team"],
                     row["match_date"]
@@ -111,6 +118,12 @@ class MainMenu(tk.Frame):
 
         teams_button = ttk.Button(button_frame, text="Csapatok megtekintése", command=self.app.show_teams)
         teams_button.pack(side="left", padx=5)
+
+        add_button = ttk.Button(button_frame, text="Hozzáadás", command=self.add_to_selected)
+        add_button.pack(side="left", padx=5)
+
+        view_selected_button = ttk.Button(button_frame, text="Kiválasztott mérkőzések és szimulációk", command=self.show_selected_fixtures)
+        view_selected_button.pack(side="left", padx=5)
 
     def on_fixture_click(self, event):
         """Kezeli a mérkőzésre való kattintást."""
@@ -182,3 +195,101 @@ class MainMenu(tk.Frame):
         # Vissza gomb hozzáadása
         back_button = ttk.Button(odds_window, text="Vissza", command=odds_window.destroy)
         back_button.pack(pady=10)
+
+    def add_to_selected(self):
+        """Kiválasztott mérkőzések hozzáadása a listához."""
+        global selected_fixtures, selected_window
+        selected_items = self.treeview.selection()
+        new_fixtures = []
+
+        for item in selected_items:
+            fixture_data = self.treeview.item(item, "values")
+            if fixture_data not in selected_fixtures:
+                selected_fixtures.append(fixture_data)
+                new_fixtures.append(fixture_data)
+
+        if not new_fixtures:
+            messagebox.showinfo("Információ", "Nincs új mérkőzés a kiválasztott listában.")
+            return
+
+        messagebox.showinfo("Siker", f"{len(new_fixtures)} új mérkőzés hozzáadva a kiválasztott mérkőzésekhez.")
+
+        # Ha a kiválasztott ablak nyitva van, frissítjük annak tartalmát
+        if selected_window and selected_window.winfo_exists():
+            selected_window.refresh_selected_fixtures()
+
+    def show_selected_fixtures(self):
+        """Megjeleníti a kiválasztott mérkőzéseket egy új ablakban."""
+        global selected_window
+
+        if selected_window is None or not selected_window.winfo_exists():
+            selected_window = SelectedFixturesWindow(self)
+        else:
+            selected_window.lift()
+
+class SelectedFixturesWindow(tk.Toplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Kiválasztott mérkőzések")
+        self.geometry("600x400")
+
+        # Treeview a kiválasztott mérkőzésekhez
+        self.treeview = ttk.Treeview(self, columns=("fixture_id", "home_team", "away_team", "match_date"), show="headings")
+        self.treeview.heading("fixture_id", text="Mérkőzés ID")
+        self.treeview.heading("home_team", text="Hazai csapat")
+        self.treeview.heading("away_team", text="Vendég csapat")
+        self.treeview.heading("match_date", text="Dátum")
+        self.treeview.pack(fill="both", expand=True)
+
+        # Gombok hozzáadása
+        self.add_buttons()
+
+        # Kiválasztott mérkőzések betöltése
+        self.load_selected_fixtures()
+
+    def add_buttons(self):
+        """Gombok hozzáadása az ablakhoz."""
+        button_frame = tk.Frame(self)
+        button_frame.pack(pady=10)
+
+        delete_button = ttk.Button(button_frame, text="Törlés", command=self.delete_selected_fixtures)
+        delete_button.pack(side="left", padx=5)
+
+        close_button = ttk.Button(button_frame, text="Bezárás", command=self.destroy)
+        close_button.pack(side="left", padx=5)
+
+    def load_selected_fixtures(self):
+        """Betölti a kiválasztott mérkőzéseket a táblázatba."""
+        global selected_fixtures
+
+        # Előző sorok törlése
+        for item in self.treeview.get_children():
+            self.treeview.delete(item)
+
+        # Új sorok hozzáadása
+        for fixture in selected_fixtures:
+            self.treeview.insert("", "end", values=fixture)
+
+    def refresh_selected_fixtures(self):
+        """Frissíti a kiválasztott mérkőzések táblázatának tartalmát."""
+        self.load_selected_fixtures()
+
+    def delete_selected_fixtures(self):
+        """Eltávolítja a kijelölt mérkőzéseket a listából és frissíti a táblázatot."""
+        global selected_fixtures
+
+        # Kijelölt elemek azonosítása
+        selected_items = self.treeview.selection()
+        for item in selected_items:
+            fixture_data = self.treeview.item(item, "values")
+            if fixture_data in selected_fixtures:
+                selected_fixtures.remove(fixture_data)
+
+        # Figyelmeztetés, ha nincs kijelölés
+        if not selected_items:
+            messagebox.showwarning("Figyelmeztetés", "Nem választottál ki törlendő mérkőzést.")
+        else:
+            messagebox.showinfo("Siker", f"{len(selected_items)} mérkőzés törölve.")
+
+        # Lista frissítése
+        self.load_selected_fixtures()

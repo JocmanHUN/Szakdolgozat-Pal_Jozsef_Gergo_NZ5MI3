@@ -279,14 +279,29 @@ def fetch_odds_for_fixture(fixture_id):
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         data = response.json()
-        return data.get('response', [])
+
+        # Ellenőrizzük, hogy a "response" kulcs nem üres
+        if not data.get("response"):
+            print(f"Nincs odds a mérkőzéshez: {fixture_id}")
+            return []
+
+        # Lekérjük a Match Winner oddsokat
+        for bookmaker in data["response"][0].get("bookmakers", []):
+            for bet in bookmaker.get("bets", []):
+                if bet.get("name") == "Match Winner":
+                    return data["response"]  # Visszaadjuk a teljes odds adatokat, ha találunk Match Winner típust
+
+        print(f"Match Winner odds nem található: {fixture_id}")
+        return []
+
     except requests.exceptions.RequestException as e:
         print(f"API hiba az oddsok lekérdezésekor: {e}")
         return []
 
+
 def save_pre_match_fixtures():
     """
-    Lekéri az API-ból az összes NS státuszú mérkőzést, és csak a mérkőzés adatokat menti az adatbázisba.
+    Lekéri az API-ból az összes NS státuszú mérkőzést, és csak azokat menti, amelyekhez tartozik odds.
     """
     url = f"{BASE_URL}fixtures"
     headers = {
@@ -294,9 +309,9 @@ def save_pre_match_fixtures():
         'x-rapidapi-host': HOST
     }
     params = {
-        'status': 'NS',
+        'status': 'NS',  # Csak a Not Started státuszú mérkőzések
         'timezone': 'Europe/Budapest',
-        'date': get_tomorrow_date()
+        'date': get_tomorrow_date()  # Holnapi mérkőzések
     }
 
     try:
@@ -305,6 +320,14 @@ def save_pre_match_fixtures():
         fixtures = response.json().get('response', [])
 
         for fixture in fixtures:
+            fixture_id = fixture["fixture"]["id"]
+
+            # Ellenőrizzük, hogy tartozik-e odds a mérkőzéshez
+            odds = fetch_odds_for_fixture(fixture_id)
+            if not odds:
+                print(f"Nincs odds a mérkőzéshez, kihagyva: {fixture_id}")
+                continue  # Ha nincs odds, ugorjuk át
+
             fixture_data = {
                 "id": fixture["fixture"]["id"],
                 "date": fixture["fixture"]["date"],
@@ -321,7 +344,9 @@ def save_pre_match_fixtures():
                 "status": "NS",
             }
             write_to_fixtures([fixture_data])
-        print(f"{len(fixtures)} mérkőzés mentve.")
+            print(
+                f"Mérkőzés mentve: {fixture_id} - {fixture_data['home_team_name']} vs {fixture_data['away_team_name']}")
+
     except requests.exceptions.RequestException as e:
         print(f"API hiba történt: {e}")
 
@@ -371,3 +396,4 @@ def save_odds_for_fixture(fixture_id):
                 })
     write_to_odds(odds_to_save)
     print(f"Odds mentve a mérkőzéshez: {fixture_id}")
+
