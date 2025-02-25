@@ -598,10 +598,23 @@ def update_fixtures_status():
 
             try:
                 response = requests.get(url, headers=headers, params=params)
-                response.raise_for_status()
-                data = response.json().get("response", [{}])[0]
+                response.raise_for_status()  # Ha hiba van a HTTP válaszban, dobjon kivételt
 
-                # Kinyerjük az adatokat az API válaszból
+                # Ellenőrizzük, hogy a válasz JSON formátumú-e
+                try:
+                    json_data = response.json()
+                except ValueError:
+                    print(f"Nem JSON válasz érkezett az API-tól a(z) {fixture_id} mérkőzéshez.")
+                    continue
+
+                # Ellenőrizzük, hogy van-e "response" kulcs és nem üres-e
+                if "response" not in json_data or not json_data["response"]:
+                    print(f"Nincs adat az API válaszában a(z) {fixture_id} mérkőzéshez.")
+                    continue
+
+                # Ha van adat, dolgozzuk fel
+                data = json_data["response"][0]
+
                 new_status = data["fixture"]["status"]["short"]
                 new_date = data["fixture"]["date"]
                 home_score = data["score"]["fulltime"]["home"]

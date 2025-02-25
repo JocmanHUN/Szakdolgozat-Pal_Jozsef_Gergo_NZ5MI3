@@ -366,34 +366,70 @@ def fetch_bookmakers_from_odds(odds_response):
             bookmakers[bookmaker["id"]] = bookmaker["name"]
     return bookmakers
 
+import requests
+from src.config import API_KEY, BASE_URL, HOST
+from src.Backend.helpersAPI import write_to_odds
+
 def save_odds_for_fixture(fixture_id):
     """
-    Lekéri és menti az oddsokat egy adott mérkőzéshez, csak a végkimenetelt kezelve.
+    Lekéri és elmenti az oddsokat egy adott mérkőzéshez.
     """
-    existing_odds = get_odds_by_fixture_id(fixture_id)
-    if existing_odds:
-        print(f"Odds már létezik az adatbázisban: {fixture_id}")
-        return
+    print(f"Odds lekérése a mérkőzéshez: {fixture_id}")  # Debug kiírás
 
-    # Oddsok lekérdezése az API-ból
-    odds = fetch_odds_for_fixture(fixture_id)
-    if not odds:
-        print(f"Nincs odds a mérkőzéshez: {fixture_id}")
-        return
+    url = f"{BASE_URL}odds"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {'fixture': fixture_id}
 
-    # Csak a "Match Winner" oddsok mentése
-    odds_to_save = []
-    for bookmaker in odds[0]["bookmakers"]:
-        for bet in bookmaker["bets"]:
-            if bet["name"] == "Match Winner":  # Csak a "Match Winner" típusú oddsokat kezeljük
-                odds_to_save.append({
-                    "fixture_id": fixture_id,
-                    "bookmaker_id": bookmaker["id"],
-                    "home_odds": bet["values"][0]["odd"],
-                    "draw_odds": bet["values"][1]["odd"],
-                    "away_odds": bet["values"][2]["odd"],
-                    "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                })
-    write_to_odds(odds_to_save)
-    print(f"Odds mentve a mérkőzéshez: {fixture_id}")
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()  # HTTP hibák kezelése (pl. 404, 500)
+
+        # API válasz kiírása konzolra
+        json_data = response.json()
+        print(f"API válasz az oddsokra ({fixture_id}): {json_data}")
+
+        if "response" not in json_data or not json_data["response"]:
+            print(f"HIBA: Az API nem adott vissza oddsokat a(z) {fixture_id} mérkőzéshez.")
+            return
+
+        odds_data = json_data["response"]
+        formatted_odds = []
+
+        for bookmaker in odds_data:
+            bookmaker_id = bookmaker["bookmaker"]["id"]
+            bookmaker_name = bookmaker["bookmaker"]["name"]
+            for bet in bookmaker["bets"]:
+                if bet["name"] == "Match Winner":  # Csak a mérkőzés győztes oddsokat nézzük
+                    for value in bet["values"]:
+                        if value["value"] == "Home":
+                            home_odds = value["odd"]
+                        elif value["value"] == "Draw":
+                            draw_odds = value["odd"]
+                        elif value["value"] == "Away":
+                            away_odds = value["odd"]
+
+                    formatted_odds.append({
+                        "fixture_id": fixture_id,
+                        "bookmaker_id": bookmaker_id,
+                        "bookmaker": bookmaker_name,
+                        "home_odds": home_odds,
+                        "draw_odds": draw_odds,
+                        "away_odds": away_odds,
+                        "updated_at": bookmaker["updated"]
+                    })
+
+        if not formatted_odds:
+            print(f"HIBA: Nem találtunk megfelelő oddsokat a(z) {fixture_id} mérkőzéshez.")
+            return
+
+        # Adatok mentése adatbázisba
+        write_to_odds(formatted_odds)
+        print(f"Sikeresen mentve {len(formatted_odds)} odds a(z) {fixture_id} mérkőzéshez.")
+
+    except requests.exceptions.RequestException as e:
+        print(f"API hiba odds lekérésekor ({fixture_id}): {e}")
+
 
