@@ -14,9 +14,11 @@ class SportsApp:
         self.root = root
         self.root.title("Sports Betting Simulation")
 
-        # Minimális és maximális méret beállítása
+        # Teljes képernyőre állítás
+        self.root.state("zoomed")
+
+        # Minimális méret beállítása, hogy minden látszódjon
         self.root.minsize(800, 600)  # Minimális méret 800x600
-        self.root.maxsize(1200, 900)  # Maximális méret 1200x900
 
         # Fogadóirodák szinkronizálása az első indításkor
         self.sync_initial_bookmakers()
@@ -68,13 +70,22 @@ class MainMenu(tk.Frame):
         save_pre_match_fixtures()
 
         # Főcím hozzáadása
-        title_label = ttk.Label(self, text="Sportfogadás valószínűségi és statisztikai alapokon", font=("Arial", 16, "bold"))
+        title_label = ttk.Label(self, text="Sportfogadás valószínűségi és statisztikai alapokon",
+                                font=("Arial", 16, "bold"))
         title_label.pack(pady=20)
 
-        # Treeview widget a mérkőzések megjelenítéséhez
-        self.treeview = ttk.Treeview(self, columns=(
+        # Treeview elhelyezéséhez egy konténer keret létrehozása
+        treeview_frame = tk.Frame(self)
+        treeview_frame.pack(fill="both", expand=True, pady=10)
+
+        # Scrollbar létrehozása
+        scrollbar = ttk.Scrollbar(treeview_frame, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+
+        # Treeview widget létrehozása és csatolása a scrollbar-hoz
+        self.treeview = ttk.Treeview(treeview_frame, columns=(
             "fixture_id", "home_team", "away_team", "match_date"
-        ), show="headings")
+        ), show="headings", yscrollcommand=scrollbar.set)
 
         # Oszlopok elnevezése
         self.treeview.heading("fixture_id", text="Mérkőzés ID")
@@ -88,8 +99,11 @@ class MainMenu(tk.Frame):
         self.treeview.column("away_team", width=150)
         self.treeview.column("match_date", width=150)
 
-        # Treeview elhelyezése
-        self.treeview.pack(fill="both", expand=True, pady=10)
+        # Treeview megjelenítése a containerben
+        self.treeview.pack(side="left", fill="both", expand=True)
+
+        # Scrollbar összekapcsolása a Treeview-el
+        scrollbar.config(command=self.treeview.yview)
 
         # Adatok betöltése
         self.load_fixtures()
@@ -197,13 +211,13 @@ class MainMenu(tk.Frame):
         ), show="headings", yscrollcommand=scrollbar.set)
 
         odds_treeview.heading("bookmaker", text="Iroda",
-                              command=lambda: sort_treeview(odds_treeview, "bookmaker", False))
+                              command=lambda: self.sort_treeview(odds_treeview, "bookmaker", False))
         odds_treeview.heading("home_odds", text="Hazai Odds",
-                              command=lambda: sort_treeview(odds_treeview, "home_odds", False))
+                              command=lambda: self.sort_treeview(odds_treeview, "home_odds", False))
         odds_treeview.heading("draw_odds", text="Döntetlen Odds",
-                              command=lambda: sort_treeview(odds_treeview, "draw_odds", False))
+                              command=lambda: self.sort_treeview(odds_treeview, "draw_odds", False))
         odds_treeview.heading("away_odds", text="Vendég Odds",
-                              command=lambda: sort_treeview(odds_treeview, "away_odds", False))
+                              command=lambda: self.sort_treeview(odds_treeview, "away_odds", False))
 
         odds_treeview.column("bookmaker", width=150)
         odds_treeview.column("home_odds", width=100)
@@ -244,7 +258,7 @@ class MainMenu(tk.Frame):
             treeview.move(item, '', index)
 
         # Oszlop újrarendezése csökkenő/növekvő sorrendben
-        treeview.heading(column, command=lambda: sort_treeview(treeview, column, not reverse))
+        treeview.heading(column, command=lambda: treeview.sort_treeview(treeview, column, not reverse))
 
     def add_to_selected(self):
         """Kiválasztott mérkőzések hozzáadása a listához."""
