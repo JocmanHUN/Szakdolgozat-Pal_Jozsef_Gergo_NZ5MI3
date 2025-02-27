@@ -2,8 +2,8 @@ import mysql.connector
 import requests
 
 from src.config import DB_CONFIG, BASE_URL, API_KEY, HOST
-
-
+from dateutil import parser
+import pytz
 def get_db_connection():
     """Establishes the database connection."""
     try:
@@ -544,9 +544,6 @@ def get_pre_match_fixtures():
         connection.close()
 
 def save_bookmakers(bookmakers):
-    """
-    Elmenti a fogadóirodák adatait az adatbázisba.
-    """
     connection = get_db_connection()
     if connection is None:
         return
@@ -581,7 +578,7 @@ def update_fixtures_status():
     cursor = connection.cursor(dictionary=True)
     try:
         # Lekérdezzük az adatbázisból az összes `NS` státuszú mérkőzést
-        query = "SELECT id, status, date, score_home, score_away FROM fixtures WHERE status = 'NS'"
+        query = "SELECT id, status, DATE_FORMAT(date, '%Y-%m-%dT%H:%i:%sZ') as date, score_home, score_away FROM fixtures WHERE status = 'NS'"
         cursor.execute(query)
         fixtures = cursor.fetchall()
 
@@ -603,17 +600,33 @@ def update_fixtures_status():
 
                 # Kinyerjük az adatokat az API válaszból
                 new_status = data["fixture"]["status"]["short"]
-                new_date = data["fixture"]["date"]
-                home_score = data["score"]["fulltime"]["home"]
-                away_score = data["score"]["fulltime"]["away"]
+                new_date = normalize_date(data["fixture"]["date"])
+                home_score = data["score"]["fulltime"].get("home")
+                away_score = data["score"]["fulltime"].get("away")
 
-                # Csak akkor frissítünk, ha változás történt
-                if (
-                    fixture["status"] != new_status or
-                    fixture["date"] != new_date or
-                    fixture["score_home"] != home_score or
-                    fixture["score_away"] != away_score
-                ):
+                # Normalize értékek összehasonlítás előtt
+                db_status = fixture["status"].strip().upper()
+                api_status = new_status.strip().upper()
+                db_date = normalize_date(fixture["date"])
+
+                db_home_score = fixture["score_home"] if fixture["score_home"] is not None else 0
+                db_away_score = fixture["score_away"] if fixture["score_away"] is not None else 0
+                api_home_score = home_score if home_score is not None else 0
+                api_away_score = away_score if away_score is not None else 0
+
+                # Ellenőrizzük a változásokat
+                changes = []
+                if db_status != api_status:
+                    changes.append(f"status: {db_status} -> {api_status}")
+                if db_date != new_date:
+                    changes.append(f"date: {db_date} -> {new_date}")
+                if db_home_score != api_home_score:
+                    changes.append(f"score_home: {db_home_score} -> {api_home_score}")
+                if db_away_score != api_away_score:
+                    changes.append(f"score_away: {db_away_score} -> {api_away_score}")
+
+                # Csak akkor frissítünk, ha történt változás
+                if changes:
                     update_query = """
                         UPDATE fixtures
                         SET 
@@ -631,7 +644,9 @@ def update_fixtures_status():
                         fixture_id
                     ))
                     connection.commit()
-                    print(f"Mérkőzés frissítve: {fixture_id}, státusz: {new_status}")
+                    print(f"Mérkőzés frissítve: {fixture_id}, változások: {', '.join(changes)}")
+                else:
+                    print(f"Mérkőzés változatlan: {fixture_id}, státusz: {db_status}")
 
             except requests.exceptions.RequestException as e:
                 print(f"API hiba a mérkőzés frissítésekor ({fixture_id}): {e}")
@@ -641,3 +656,33 @@ def update_fixtures_status():
     finally:
         cursor.close()
         connection.close()
+
+def read_from_bookmakers():
+    connection = get_db_connection()
+    if connection is None:
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT id, name FROM bookmakers")
+        return cursor.fetchall()
+    except mysql.connector.Error as err:
+        print(f"Database read error for bookmakers: {err}")
+        return []
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def normalize_date(date_str):
+    """
+    Normalizálja a dátum formátumát UTC-re (ISO 8601), hogy az összehasonlítás biztosan helyes legyen.
+    :param date_str: A dátum sztring formátumban.
+    :return: ISO 8601 formátumú UTC dátum (pl. 2025-01-12T18:15:00Z).
+    """
+    if not date_str:
+        return None
+    # Parse és UTC-re konvertálás
+    parsed_date = parser.isoparse(date_str).astimezone(pytz.utc)
+    return parsed_date.strftime("%Y-%m-%dT%H:%M:%SZ")  # UTC idő formátuma
+

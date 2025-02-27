@@ -301,7 +301,8 @@ def fetch_odds_for_fixture(fixture_id):
 
 def save_pre_match_fixtures():
     """
-    Lekéri az API-ból az összes NS státuszú mérkőzést, és csak azokat menti, amelyekhez tartozik odds.
+    Lekéri az összes NS státuszú mérkőzést az API-ból, és csak azokat menti el az adatbázisba,
+    amelyekhez legalább egy odds található.
     """
     url = f"{BASE_URL}fixtures"
     headers = {
@@ -322,12 +323,13 @@ def save_pre_match_fixtures():
         for fixture in fixtures:
             fixture_id = fixture["fixture"]["id"]
 
-            # Ellenőrizzük, hogy tartozik-e odds a mérkőzéshez
+            # Lekérdezzük, hogy van-e odds a mérkőzéshez
             odds = fetch_odds_for_fixture(fixture_id)
             if not odds:
                 print(f"Nincs odds a mérkőzéshez, kihagyva: {fixture_id}")
-                continue  # Ha nincs odds, ugorjuk át
+                continue  # Ha nincs odds, a mérkőzés kimarad
 
+            # Ha van odds, a mérkőzést elmentjük
             fixture_data = {
                 "id": fixture["fixture"]["id"],
                 "date": fixture["fixture"]["date"],
@@ -344,12 +346,10 @@ def save_pre_match_fixtures():
                 "status": "NS",
             }
             write_to_fixtures([fixture_data])
-            print(
-                f"Mérkőzés mentve: {fixture_id} - {fixture_data['home_team_name']} vs {fixture_data['away_team_name']}")
+            print(f"Mérkőzés mentve: {fixture_data['id']} - {fixture_data['home_team_name']} vs {fixture_data['away_team_name']}")
 
     except requests.exceptions.RequestException as e:
         print(f"API hiba történt: {e}")
-
 
 def get_tomorrow_date():
     """Visszaadja a holnapi dátumot YYYY-MM-DD formátumban."""
@@ -367,25 +367,18 @@ def fetch_bookmakers_from_odds(odds_response):
     return bookmakers
 
 def save_odds_for_fixture(fixture_id):
-    """
-    Lekéri és menti az oddsokat egy adott mérkőzéshez, csak a végkimenetelt kezelve.
-    """
-    existing_odds = get_odds_by_fixture_id(fixture_id)
-    if existing_odds:
-        print(f"Odds már létezik az adatbázisban: {fixture_id}")
-        return
-
-    # Oddsok lekérdezése az API-ból
     odds = fetch_odds_for_fixture(fixture_id)
     if not odds:
         print(f"Nincs odds a mérkőzéshez: {fixture_id}")
         return
 
-    # Csak a "Match Winner" oddsok mentése
+    bookmakers = fetch_bookmakers_from_odds(odds)
+    save_bookmakers(bookmakers)  # Fogadóirodák mentése az adatbázisba
+
     odds_to_save = []
     for bookmaker in odds[0]["bookmakers"]:
         for bet in bookmaker["bets"]:
-            if bet["name"] == "Match Winner":  # Csak a "Match Winner" típusú oddsokat kezeljük
+            if bet["name"] == "Match Winner":
                 odds_to_save.append({
                     "fixture_id": fixture_id,
                     "bookmaker_id": bookmaker["id"],
@@ -396,4 +389,35 @@ def save_odds_for_fixture(fixture_id):
                 })
     write_to_odds(odds_to_save)
     print(f"Odds mentve a mérkőzéshez: {fixture_id}")
+
+from src.Backend.helpersAPI import read_from_bookmakers, save_bookmakers
+
+def sync_bookmakers(api_response):
+    """
+    Ellenőrzi az API válaszában található fogadóirodák listáját, és frissíti az adatbázist, ha szükséges.
+    :param api_response: Az API válasza oddsokkal és fogadóirodákkal.
+    """
+    # 1. Lekérjük a jelenlegi adatbázisban lévő fogadóirodákat
+    current_bookmakers = {bookmaker['id']: bookmaker['name'] for bookmaker in read_from_bookmakers()}
+
+    # 2. Az API válaszából kigyűjtjük a fogadóirodákat
+    api_bookmakers = {}
+    for response in api_response:
+        for bookmaker in response.get("bookmakers", []):
+            api_bookmakers[bookmaker["id"]] = bookmaker["name"]
+
+    # 3. Új és frissítendő fogadóirodák azonosítása
+    new_bookmakers = {}
+    for bookmaker_id, bookmaker_name in api_bookmakers.items():
+        if bookmaker_id not in current_bookmakers or current_bookmakers[bookmaker_id] != bookmaker_name:
+            new_bookmakers[bookmaker_id] = bookmaker_name
+
+    # 4. Frissítés, ha vannak változások
+    if new_bookmakers:
+        print(f"{len(new_bookmakers)} új vagy frissítendő fogadóiroda található.")
+        save_bookmakers(new_bookmakers)
+    else:
+        print("Nincsenek új vagy frissítendő fogadóirodák.")
+
+
 

@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 from src.Frontend.PastResultsApp import PastResultsApp
 from src.Frontend.TeamsApp import TeamsApp
 from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id, update_fixtures_status
-from src.Backend.api_requests import save_pre_match_fixtures, save_odds_for_fixture
+from src.Backend.api_requests import save_pre_match_fixtures, save_odds_for_fixture, fetch_odds_for_fixture, sync_bookmakers
 
 # Globális lista a kiválasztott mérkőzésekhez
 selected_fixtures = []
@@ -18,10 +18,26 @@ class SportsApp:
         self.root.minsize(800, 600)  # Minimális méret 800x600
         self.root.maxsize(1200, 900)  # Maximális méret 1200x900
 
+        # Fogadóirodák szinkronizálása az első indításkor
+        self.sync_initial_bookmakers()
+
         update_fixtures_status()
 
         self.current_frame = None
         self.show_main_menu()
+
+    def sync_initial_bookmakers(self):
+        """
+        Ellenőrzi és szinkronizálja a fogadóirodák listáját az első indításkor.
+        """
+        print("Fogadóirodák szinkronizálása az első indításkor...")
+        fixtures = get_pre_match_fixtures()  # Mérkőzések lekérése
+        if fixtures:
+            fixture_id = fixtures[0]['fixture_id']  # Egy első mérkőzés ID kiválasztása
+            odds = fetch_odds_for_fixture(fixture_id)  # Oddsok lekérése
+            sync_bookmakers(odds)  # Fogadóirodák szinkronizálása
+        else:
+            print("Nincsenek elérhető mérkőzések az első indításhoz.")
 
     def show_frame(self, frame_class):
         """Eltávolítja a jelenlegi frame-et, és betölti az újat."""
@@ -140,7 +156,8 @@ class MainMenu(tk.Frame):
 
     def show_odds_window(self, fixture_data):
         """
-        Megjeleníti az oddsokat egy külön ablakban, a kiválasztott mérkőzés adataival együtt.
+        Megjeleníti az oddsokat egy külön ablakban, a kiválasztott mérkőzés adataival együtt,
+        és támogatja a rendezést az oszlopokra kattintva.
         """
         fixture_id = fixture_data[0]  # Az `fixture_id` az első oszlop
         home_team = fixture_data[1]  # Hazai csapat neve
@@ -166,15 +183,27 @@ class MainMenu(tk.Frame):
         tk.Label(details_frame, text=f"Mérkőzés: {home_team} vs {away_team}", font=("Arial", 14, "bold")).pack()
         tk.Label(details_frame, text=f"Dátum: {match_date}", font=("Arial", 12)).pack()
 
-        # Oddsok megjelenítése Treeview-ben
-        odds_treeview = ttk.Treeview(odds_window, columns=(
-            "bookmaker", "home_odds", "draw_odds", "away_odds"
-        ), show="headings")
+        # Scrollbar és Treeview konténer
+        treeview_frame = tk.Frame(odds_window)
+        treeview_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        odds_treeview.heading("bookmaker", text="Iroda")
-        odds_treeview.heading("home_odds", text="Hazai Odds")
-        odds_treeview.heading("draw_odds", text="Döntetlen Odds")
-        odds_treeview.heading("away_odds", text="Vendég Odds")
+        # Scrollbar hozzáadása
+        scrollbar = ttk.Scrollbar(treeview_frame, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+
+        # Treeview widget a scrollbar-ral
+        odds_treeview = ttk.Treeview(treeview_frame, columns=(
+            "bookmaker", "home_odds", "draw_odds", "away_odds"
+        ), show="headings", yscrollcommand=scrollbar.set)
+
+        odds_treeview.heading("bookmaker", text="Iroda",
+                              command=lambda: sort_treeview(odds_treeview, "bookmaker", False))
+        odds_treeview.heading("home_odds", text="Hazai Odds",
+                              command=lambda: sort_treeview(odds_treeview, "home_odds", False))
+        odds_treeview.heading("draw_odds", text="Döntetlen Odds",
+                              command=lambda: sort_treeview(odds_treeview, "draw_odds", False))
+        odds_treeview.heading("away_odds", text="Vendég Odds",
+                              command=lambda: sort_treeview(odds_treeview, "away_odds", False))
 
         odds_treeview.column("bookmaker", width=150)
         odds_treeview.column("home_odds", width=100)
@@ -182,6 +211,9 @@ class MainMenu(tk.Frame):
         odds_treeview.column("away_odds", width=100)
 
         odds_treeview.pack(fill="both", expand=True)
+
+        # Scrollbar összekapcsolása a Treeview-vel
+        scrollbar.config(command=odds_treeview.yview)
 
         # Betöltjük az oddsokat a Treeview-be
         for odd in odds:
@@ -195,6 +227,24 @@ class MainMenu(tk.Frame):
         # Vissza gomb hozzáadása
         back_button = ttk.Button(odds_window, text="Vissza", command=odds_window.destroy)
         back_button.pack(pady=10)
+
+    def sort_treeview(treeview, column, reverse):
+        """
+        Rendezi a Treeview tartalmát az adott oszlop alapján.
+        :param treeview: A rendezendő Treeview widget.
+        :param column: Az oszlop neve, amely alapján rendezünk.
+        :param reverse: Ha True, csökkenő sorrendbe rendez.
+        """
+        # A Treeview sorainak lekérdezése és rendezése
+        data = [(treeview.set(child, column), child) for child in treeview.get_children('')]
+        data.sort(reverse=reverse, key=lambda x: float(x[0]) if column != "bookmaker" else x[0])
+
+        # Sorok újra behelyezése rendezett sorrendben
+        for index, (value, item) in enumerate(data):
+            treeview.move(item, '', index)
+
+        # Oszlop újrarendezése csökkenő/növekvő sorrendben
+        treeview.heading(column, command=lambda: sort_treeview(treeview, column, not reverse))
 
     def add_to_selected(self):
         """Kiválasztott mérkőzések hozzáadása a listához."""
