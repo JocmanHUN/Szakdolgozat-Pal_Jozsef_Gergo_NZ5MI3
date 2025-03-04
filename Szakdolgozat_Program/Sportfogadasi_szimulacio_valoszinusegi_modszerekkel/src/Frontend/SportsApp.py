@@ -87,11 +87,12 @@ class MainMenu(tk.Frame):
             "fixture_id", "home_team", "away_team", "match_date"
         ), show="headings", yscrollcommand=scrollbar.set)
 
-        # Oszlopok elnevezése
-        self.treeview.heading("fixture_id", text="Mérkőzés ID")
-        self.treeview.heading("home_team", text="Hazai csapat")
-        self.treeview.heading("away_team", text="Vendég csapat")
-        self.treeview.heading("match_date", text="Dátum")
+        self.sort_orders = {"fixture_id": False, "home_team": False, "away_team": False, "match_date": False}
+
+        self.treeview.heading("fixture_id", text="Mérkőzés ID", command=lambda: self.sort_treeview("fixture_id"))
+        self.treeview.heading("home_team", text="Hazai csapat", command=lambda: self.sort_treeview("home_team"))
+        self.treeview.heading("away_team", text="Vendég csapat", command=lambda: self.sort_treeview("away_team"))
+        self.treeview.heading("match_date", text="Dátum", command=lambda: self.sort_treeview("match_date"))
 
         # Oszlopok méretezése
         self.treeview.column("fixture_id", width=100)
@@ -242,23 +243,27 @@ class MainMenu(tk.Frame):
         back_button = ttk.Button(odds_window, text="Vissza", command=odds_window.destroy)
         back_button.pack(pady=10)
 
-    def sort_treeview(treeview, column, reverse):
+    def sort_treeview(self, column):
         """
         Rendezi a Treeview tartalmát az adott oszlop alapján.
-        :param treeview: A rendezendő Treeview widget.
         :param column: Az oszlop neve, amely alapján rendezünk.
-        :param reverse: Ha True, csökkenő sorrendbe rendez.
         """
+        # Rendelési sorrend megfordítása
+        self.sort_orders[column] = not self.sort_orders[column]
+        reverse = self.sort_orders[column]
+
         # A Treeview sorainak lekérdezése és rendezése
-        data = [(treeview.set(child, column), child) for child in treeview.get_children('')]
-        data.sort(reverse=reverse, key=lambda x: float(x[0]) if column != "bookmaker" else x[0])
+        data = [(self.treeview.set(child, column), child) for child in self.treeview.get_children('')]
+
+        # Megpróbáljuk számként értelmezni az oszlopokat
+        try:
+            data.sort(reverse=reverse, key=lambda x: float(x[0]) if column in ["fixture_id", "match_date"] else x[0])
+        except ValueError:
+            data.sort(reverse=reverse, key=lambda x: x[0].lower())  # Ha nem szám, akkor szöveg szerint rendez
 
         # Sorok újra behelyezése rendezett sorrendben
         for index, (value, item) in enumerate(data):
-            treeview.move(item, '', index)
-
-        # Oszlop újrarendezése csökkenő/növekvő sorrendben
-        treeview.heading(column, command=lambda: treeview.sort_treeview(treeview, column, not reverse))
+            self.treeview.move(item, '', index)
 
     def add_to_selected(self):
         """Kiválasztott mérkőzések hozzáadása a listához."""

@@ -1,14 +1,15 @@
 # api_requests.py
 from datetime import datetime, timedelta
 
+import pytz
 import requests
-import os
 from src.config import API_KEY, BASE_URL, HOST
 from src.Backend.helpersAPI import (
     write_to_leagues, read_from_leagues,
     write_to_teams, read_from_teams,
     write_to_fixtures, read_from_fixtures,
-    write_to_match_statistics, read_from_match_statistics, write_to_odds, get_odds_by_fixture_id, save_bookmakers
+    write_to_match_statistics, read_from_match_statistics, write_to_odds, get_odds_by_fixture_id, save_bookmakers,
+    odds_already_saved
 )
 
 def get_leagues():
@@ -309,52 +310,59 @@ def save_pre_match_fixtures():
         'x-apisports-key': API_KEY,
         'x-rapidapi-host': HOST
     }
-    params = {
-        'status': 'NS',  # Csak a Not Started státuszú mérkőzések
-        'timezone': 'Europe/Budapest',
-        'date': get_tomorrow_date()  # Holnapi mérkőzések
-    }
+    dates = get_next_days_dates(3)  # Következő 3 nap dátumai
+    for match_date in dates:
+        params = {
+            'status': 'NS',  # Csak a Not Started státuszú mérkőzések
+            'timezone': 'Europe/Budapest',
+            'date': match_date  # Az adott napi mérkőzések lekérése
+        }
 
-    try:
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        fixtures = response.json().get('response', [])
+        try:
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            fixtures = response.json().get('response', [])
 
-        for fixture in fixtures:
-            fixture_id = fixture["fixture"]["id"]
+            for fixture in fixtures:
+                fixture_id = fixture["fixture"]["id"]
 
-            # Lekérdezzük, hogy van-e odds a mérkőzéshez
-            odds = fetch_odds_for_fixture(fixture_id)
-            if not odds:
-                print(f"Nincs odds a mérkőzéshez, kihagyva: {fixture_id}")
-                continue  # Ha nincs odds, a mérkőzés kimarad
+                # Lekérdezzük, hogy van-e odds a mérkőzéshez
+                odds = fetch_odds_for_fixture(fixture_id)
+                if not odds:
+                    print(f"Nincs odds a mérkőzéshez, kihagyva: {fixture_id}")
+                    continue  # Ha nincs odds, a mérkőzés kimarad
 
-            # Ha van odds, a mérkőzést elmentjük
-            fixture_data = {
-                "id": fixture["fixture"]["id"],
-                "date": fixture["fixture"]["date"],
-                "home_team_id": fixture["teams"]["home"]["id"],
-                "home_team_name": fixture["teams"]["home"]["name"],
-                "home_team_country": fixture["league"].get("country", "Unknown"),
-                "home_team_logo": fixture["teams"]["home"]["logo"],
-                "away_team_id": fixture["teams"]["away"]["id"],
-                "away_team_name": fixture["teams"]["away"]["name"],
-                "away_team_country": fixture["league"].get("country", "Unknown"),
-                "away_team_logo": fixture["teams"]["away"]["logo"],
-                "score_home": None,
-                "score_away": None,
-                "status": "NS",
-            }
-            write_to_fixtures([fixture_data])
-            print(f"Mérkőzés mentve: {fixture_data['id']} - {fixture_data['home_team_name']} vs {fixture_data['away_team_name']}")
+                # Ha van odds, a mérkőzést elmentjük
+                fixture_data = {
+                    "id": fixture["fixture"]["id"],
+                    "date": fixture["fixture"]["date"],
+                    "home_team_id": fixture["teams"]["home"]["id"],
+                    "home_team_name": fixture["teams"]["home"]["name"],
+                    "home_team_country": fixture["league"].get("country", "Unknown"),
+                    "home_team_logo": fixture["teams"]["home"]["logo"],
+                    "away_team_id": fixture["teams"]["away"]["id"],
+                    "away_team_name": fixture["teams"]["away"]["name"],
+                    "away_team_country": fixture["league"].get("country", "Unknown"),
+                    "away_team_logo": fixture["teams"]["away"]["logo"],
+                    "score_home": None,
+                    "score_away": None,
+                    "status": "NS",
+                }
+                write_to_fixtures([fixture_data])
+                print(
+                    f"Mérkőzés mentve: {fixture_data['id']} - {fixture_data['home_team_name']} vs {fixture_data['away_team_name']} ({match_date})")
 
-    except requests.exceptions.RequestException as e:
-        print(f"API hiba történt: {e}")
+        except requests.exceptions.RequestException as e:
+            print(f"API hiba történt ({match_date}): {e}")
 
-def get_tomorrow_date():
-    """Visszaadja a holnapi dátumot YYYY-MM-DD formátumban."""
-    tomorrow = datetime.now() + timedelta(days=1)
-    return tomorrow.strftime('%Y-%m-%d')
+def get_next_days_dates(days=3):
+    """
+    Legenerálja a következő `days` nap dátumait Budapest időzónában.
+    :return: Lista a következő napok dátumaival (pl. ['2025-03-06', '2025-03-07', '2025-03-08'])
+    """
+    budapest_tz = pytz.timezone("Europe/Budapest")
+    today = datetime.now(budapest_tz)
+    return [(today + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(1, days + 1)]  # Holnaptól kezdve
 
 def fetch_bookmakers_from_odds(odds_response):
     """
@@ -367,6 +375,11 @@ def fetch_bookmakers_from_odds(odds_response):
     return bookmakers
 
 def save_odds_for_fixture(fixture_id):
+    # Ellenőrizzük, hogy az odds már el van-e mentve
+    if odds_already_saved(fixture_id):
+        print(f"Az odds már el van mentve a mérkőzéshez: {fixture_id}, nem mentünk újra.")
+        return
+
     odds = fetch_odds_for_fixture(fixture_id)
     if not odds:
         print(f"Nincs odds a mérkőzéshez: {fixture_id}")
@@ -387,8 +400,12 @@ def save_odds_for_fixture(fixture_id):
                     "away_odds": bet["values"][2]["odd"],
                     "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 })
-    write_to_odds(odds_to_save)
-    print(f"Odds mentve a mérkőzéshez: {fixture_id}")
+
+    if odds_to_save:
+        write_to_odds(odds_to_save)
+        print(f"Odds mentve a mérkőzéshez: {fixture_id}")
+
+
 
 from src.Backend.helpersAPI import read_from_bookmakers, save_bookmakers
 

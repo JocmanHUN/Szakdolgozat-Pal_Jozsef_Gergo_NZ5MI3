@@ -591,7 +591,7 @@ def update_fixtures_status():
                 'x-apisports-key': API_KEY,
                 'x-rapidapi-host': HOST
             }
-            params = {'id': fixture_id}
+            params = {'id': fixture_id, 'timezone': 'Europe/Budapest'}
 
             try:
                 response = requests.get(url, headers=headers, params=params)
@@ -607,7 +607,7 @@ def update_fixtures_status():
                 # Normalize értékek összehasonlítás előtt
                 db_status = fixture["status"].strip().upper()
                 api_status = new_status.strip().upper()
-                db_date = normalize_date(fixture["date"])
+                db_date = fixture["date"]
 
                 db_home_score = fixture["score_home"] if fixture["score_home"] is not None else 0
                 db_away_score = fixture["score_away"] if fixture["score_away"] is not None else 0
@@ -676,13 +676,44 @@ def read_from_bookmakers():
 
 def normalize_date(date_str):
     """
-    Normalizálja a dátum formátumát UTC-re (ISO 8601), hogy az összehasonlítás biztosan helyes legyen.
-    :param date_str: A dátum sztring formátumban.
-    :return: ISO 8601 formátumú UTC dátum (pl. 2025-01-12T18:15:00Z).
+    Normalizálja az API-ból kapott dátumot. Ha már UTC-ben van, nem módosít rajta.
     """
     if not date_str:
         return None
-    # Parse és UTC-re konvertálás
-    parsed_date = parser.isoparse(date_str).astimezone(pytz.utc)
-    return parsed_date.strftime("%Y-%m-%dT%H:%M:%SZ")  # UTC idő formátuma
+
+    parsed_date = parser.isoparse(date_str)
+
+    # Ha már UTC-ben van (tartalmaz "Z"-t vagy időzónát), akkor csak a formátumot egységesítjük
+    if parsed_date.tzinfo is not None:
+        return parsed_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Ha nincs időzóna információ, feltételezzük, hogy helyi idő és UTC-re konvertáljuk
+    return parsed_date.replace(tzinfo=pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def odds_already_saved(fixture_id):
+    """
+    Ellenőrzi, hogy az adott mérkőzéshez (fixture_id) már el vannak-e mentve az oddsok az adatbázisban.
+
+    :param fixture_id: A mérkőzés azonosítója.
+    :return: True, ha már van mentett odds, False egyébként.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("Nem sikerült csatlakozni az adatbázishoz.")
+        return False
+
+    cursor = connection.cursor()
+
+    try:
+        query = "SELECT COUNT(*) FROM odds WHERE fixture_id = %s"
+        cursor.execute(query, (fixture_id,))
+        result = cursor.fetchone()  # Egyetlen sor eredmény
+        return result[0] > 0  # Ha az első elem nagyobb, mint 0, akkor már van elmentett odds
+    except mysql.connector.Error as err:
+        print(f"Adatbázis hiba: {err}")
+        return False
+    finally:
+        cursor.close()
+        connection.close()
 
