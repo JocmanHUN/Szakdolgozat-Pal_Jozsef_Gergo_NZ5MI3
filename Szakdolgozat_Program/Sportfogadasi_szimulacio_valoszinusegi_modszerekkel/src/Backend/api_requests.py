@@ -9,7 +9,7 @@ from src.Backend.helpersAPI import (
     write_to_teams, read_from_teams,
     write_to_fixtures, read_from_fixtures,
     write_to_match_statistics, read_from_match_statistics, write_to_odds, get_odds_by_fixture_id, save_bookmakers,
-    odds_already_saved
+    odds_already_saved, read_from_bookmakers
 )
 
 def get_leagues():
@@ -404,10 +404,6 @@ def save_odds_for_fixture(fixture_id):
     if odds_to_save:
         write_to_odds(odds_to_save)
         print(f"Odds mentve a mérkőzéshez: {fixture_id}")
-
-
-
-from src.Backend.helpersAPI import read_from_bookmakers, save_bookmakers
 
 def sync_bookmakers(api_response):
     """
