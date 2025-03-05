@@ -24,7 +24,7 @@ class SportsApp:
         # Fogadóirodák szinkronizálása az első indításkor
         self.sync_initial_bookmakers()
 
-         update_fixtures_status()
+        update_fixtures_status()
 
         self.current_frame = None
         self.show_main_menu()
