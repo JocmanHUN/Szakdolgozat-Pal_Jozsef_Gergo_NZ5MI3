@@ -1,4 +1,5 @@
 import tkinter as tk
+from datetime import datetime
 from tkinter import ttk, messagebox
 from src.Frontend.PastResultsApp import PastResultsApp
 from src.Frontend.TeamsApp import TeamsApp
@@ -23,7 +24,7 @@ class SportsApp:
         # Fogadóirodák szinkronizálása az első indításkor
         self.sync_initial_bookmakers()
 
-        update_fixtures_status()
+         update_fixtures_status()
 
         self.current_frame = None
         self.show_main_menu()
@@ -65,10 +66,6 @@ class MainMenu(tk.Frame):
         super().__init__(app.root)
         self.app = app
 
-        # Adatok mentése (csak mérkőzések, odds nélkül)
-        print("NS státuszú mérkőzések mentése...")
-        save_pre_match_fixtures()
-
         # Főcím hozzáadása
         title_label = ttk.Label(self, text="Sportfogadás valószínűségi és statisztikai alapokon",
                                 font=("Arial", 16, "bold"))
@@ -87,12 +84,10 @@ class MainMenu(tk.Frame):
             "fixture_id", "home_team", "away_team", "match_date"
         ), show="headings", yscrollcommand=scrollbar.set)
 
-        self.sort_orders = {"fixture_id": False, "home_team": False, "away_team": False, "match_date": False}
-
-        self.treeview.heading("fixture_id", text="Mérkőzés ID", command=lambda: self.sort_treeview("fixture_id"))
-        self.treeview.heading("home_team", text="Hazai csapat", command=lambda: self.sort_treeview("home_team"))
-        self.treeview.heading("away_team", text="Vendég csapat", command=lambda: self.sort_treeview("away_team"))
-        self.treeview.heading("match_date", text="Dátum", command=lambda: self.sort_treeview("match_date"))
+        self.treeview.heading("fixture_id", text="Mérkőzés ID")
+        self.treeview.heading("home_team", text="Hazai csapat")
+        self.treeview.heading("away_team", text="Vendég csapat")
+        self.treeview.heading("match_date", text="Dátum")
 
         # Oszlopok méretezése
         self.treeview.column("fixture_id", width=100)
@@ -112,29 +107,64 @@ class MainMenu(tk.Frame):
         # Gombok hozzáadása
         self.add_buttons()
 
-        # Kattintási esemény hozzáadása
+        # Kattintási esemény tiltása a nem választható mérkőzésekre
         self.treeview.bind("<Double-1>", self.on_fixture_click)
 
     def load_fixtures(self):
-        """Betölti a pre-match mérkőzéseket a Treeview-be."""
+        """Betölti a pre-match mérkőzéseket a Treeview-be és szürkíti a nem választhatókat."""
         fixtures = get_pre_match_fixtures()
 
         # Treeview ürítése
         for item in self.treeview.get_children():
             self.treeview.delete(item)
 
+        # Jelenlegi kiválasztott mérkőzések időpontjai
+        selected_times = []
+        for fixture in selected_fixtures:
+            _, _, _, selected_date_str = fixture
+            selected_datetime = selected_date_str if isinstance(selected_date_str, datetime) else datetime.strptime(selected_date_str, "%Y-%m-%d %H:%M:%S")
+            selected_times.append(selected_datetime)
+
         # Adatok betöltése
         if fixtures:
             for row in fixtures:
-                self.treeview.insert("", "end", values=(
-                    row["fixture_id"],
-                    row["home_team"],
-                    row["away_team"],
-                    row["match_date"]
-                ))
-            print(f"{len(fixtures)} mérkőzés betöltve.")
-        else:
-            print("Nincs elérhető pre-match mérkőzés.")
+                fixture_id, home_team, away_team, match_date_str = row["fixture_id"], row["home_team"], row["away_team"], row["match_date"]
+
+                # Ha a dátum már `datetime` típusú, akkor nem kell konvertálni
+                match_datetime = match_date_str if isinstance(match_date_str, datetime) else datetime.strptime(match_date_str, "%Y-%m-%d %H:%M:%S")
+
+                # Ellenőrizzük, hogy a mérkőzés választható-e (nincs ±2 órán belül másik)
+                is_selectable = all(abs((match_datetime - t).total_seconds()) / 3600 >= 2 for t in selected_times)
+
+                # Szürke háttér a nem választható meccsekhez
+                tag = "disabled" if not is_selectable else "normal"
+
+                # Mérkőzés beszúrása a Treeview-be
+                self.treeview.insert("", "end", values=(fixture_id, home_team, away_team, match_date_str), tags=(tag,))
+
+        print(f"{len(fixtures)} mérkőzés betöltve.")
+
+        # Stílusbeállítás a szürke (nem választható) sorokhoz
+        self.treeview.tag_configure("disabled", background="#d3d3d3", foreground="gray")  # Szürke háttér és szürke szöveg
+
+    def prevent_selection(self, event):
+        """Megakadályozza a nem választható mérkőzések kijelölését."""
+        selected_items = self.treeview.selection()
+        for item in selected_items:
+            tags = self.treeview.item(item, "tags")
+            if "disabled" in tags:
+                self.treeview.selection_remove(item)  # Kijelölés törlése
+
+    def on_fixture_click(self, event):
+        """Megakadályozza a nem választható mérkőzések kijelölését."""
+        selected_items = self.treeview.selection()
+        for item in selected_items:
+            item_tags = self.treeview.item(item, "tags")
+            if "disabled" in item_tags:
+                self.treeview.selection_remove(item)  # Ha a mérkőzés "disabled", akkor ne lehessen kijelölni
+                messagebox.showwarning("Figyelmeztetés",
+                                       "Ezt a mérkőzést nem választhatod ki, mert túl közel kezdődik egy másikhoz!")
+                return
 
     def add_buttons(self):
         """Gombok hozzáadása a főképernyőhöz."""
@@ -266,16 +296,38 @@ class MainMenu(tk.Frame):
             self.treeview.move(item, '', index)
 
     def add_to_selected(self):
-        """Kiválasztott mérkőzések hozzáadása a listához."""
+        """Kiválasztott mérkőzések hozzáadása a listához ±2 órás időkorláttal."""
         global selected_fixtures, selected_window
         selected_items = self.treeview.selection()
         new_fixtures = []
 
         for item in selected_items:
             fixture_data = self.treeview.item(item, "values")
-            if fixture_data not in selected_fixtures:
-                selected_fixtures.append(fixture_data)
-                new_fixtures.append(fixture_data)
+            fixture_id, home_team, away_team, match_date_str = fixture_data
+
+            # Dátum formátum konvertálás
+            match_datetime = datetime.strptime(match_date_str, "%Y-%m-%d %H:%M:%S")
+
+            # Ellenőrizzük, hogy van-e már olyan mérkőzés, ami ±2 órán belül kezdődik
+            conflict = False
+            for selected_fixture in selected_fixtures:
+                _, _, _, selected_date_str = selected_fixture
+                selected_datetime = datetime.strptime(selected_date_str, "%Y-%m-%d %H:%M:%S")
+
+                # Ugyanazon a napon ±2 órán belül lévő meccseket nem engedjük hozzáadni
+                if match_datetime.date() == selected_datetime.date():
+                    time_diff = abs((match_datetime - selected_datetime).total_seconds()) / 3600  # Órára konvertálva
+                    if time_diff < 2:
+                        conflict = True
+                        break
+
+            if conflict:
+                messagebox.showwarning("Figyelmeztetés",
+                                       f"{home_team} vs {away_team} mérkőzés túl közel kezdődik egy már kiválasztott mérkőzéshez!")
+            else:
+                if fixture_data not in selected_fixtures:
+                    selected_fixtures.append(fixture_data)
+                    new_fixtures.append(fixture_data)
 
         if not new_fixtures:
             messagebox.showinfo("Információ", "Nincs új mérkőzés a kiválasztott listában.")
@@ -286,6 +338,8 @@ class MainMenu(tk.Frame):
         # Ha a kiválasztott ablak nyitva van, frissítjük annak tartalmát
         if selected_window and selected_window.winfo_exists():
             selected_window.refresh_selected_fixtures()
+
+        self.load_fixtures()
 
     def show_selected_fixtures(self):
         """Megjeleníti a kiválasztott mérkőzéseket egy új ablakban."""
@@ -362,3 +416,7 @@ class SelectedFixturesWindow(tk.Toplevel):
 
         # Lista frissítése
         self.load_selected_fixtures()
+
+        if isinstance(self.master.app.current_frame, MainMenu):  # Ellenőrizd, hogy a current_frame MainMenu példány-e
+            self.master.app.current_frame.load_fixtures()
+
