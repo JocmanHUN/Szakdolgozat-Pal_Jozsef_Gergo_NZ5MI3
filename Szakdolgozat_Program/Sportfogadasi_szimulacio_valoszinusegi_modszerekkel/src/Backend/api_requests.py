@@ -386,24 +386,8 @@ def save_odds_for_fixture(fixture_id):
         return
 
     bookmakers = fetch_bookmakers_from_odds(odds)
-    save_bookmakers(bookmakers)  # Fogadóirodák mentése az adatbázisba
 
-    odds_to_save = []
-    for bookmaker in odds[0]["bookmakers"]:
-        for bet in bookmaker["bets"]:
-            if bet["name"] == "Match Winner":
-                odds_to_save.append({
-                    "fixture_id": fixture_id,
-                    "bookmaker_id": bookmaker["id"],
-                    "home_odds": bet["values"][0]["odd"],
-                    "draw_odds": bet["values"][1]["odd"],
-                    "away_odds": bet["values"][2]["odd"],
-                    "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                })
-
-    if odds_to_save:
-        write_to_odds(odds_to_save)
-        print(f"Odds mentve a mérkőzéshez: {fixture_id}")
+    # Cs
 
 def sync_bookmakers(api_response):
     """

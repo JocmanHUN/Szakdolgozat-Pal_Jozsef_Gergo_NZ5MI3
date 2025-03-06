@@ -24,7 +24,7 @@ class SportsApp:
         # Fogadóirodák szinkronizálása az első indításkor
         self.sync_initial_bookmakers()
 
-        update_fixtures_status()
+        #update_fixtures_status()
 
         self.current_frame = None
         self.show_main_menu()
@@ -65,6 +65,8 @@ class MainMenu(tk.Frame):
     def __init__(self, app):
         super().__init__(app.root)
         self.app = app
+        # Rendezettségi állapot tárolása az oszlopokhoz
+        self.sort_orders = {"fixture_id": False, "home_team": False, "away_team": False, "match_date": False}
 
         # Főcím hozzáadása
         title_label = ttk.Label(self, text="Sportfogadás valószínűségi és statisztikai alapokon",
@@ -84,13 +86,17 @@ class MainMenu(tk.Frame):
             "fixture_id", "home_team", "away_team", "match_date"
         ), show="headings", yscrollcommand=scrollbar.set)
 
-        self.treeview.heading("fixture_id", text="Mérkőzés ID")
-        self.treeview.heading("home_team", text="Hazai csapat")
-        self.treeview.heading("away_team", text="Vendég csapat")
-        self.treeview.heading("match_date", text="Dátum")
+        self.treeview.heading("fixture_id", text="Mérkőzés ID",
+                              command=lambda: self.sort_treeview("fixture_id"), anchor="center")
+        self.treeview.heading("home_team", text="Hazai csapat",
+                              command=lambda: self.sort_treeview("home_team"))
+        self.treeview.heading("away_team", text="Vendég csapat",
+                              command=lambda: self.sort_treeview("away_team"))
+        self.treeview.heading("match_date", text="Dátum",
+                              command=lambda: self.sort_treeview("match_date"))
 
         # Oszlopok méretezése
-        self.treeview.column("fixture_id", width=100)
+        self.treeview.column("fixture_id", width=100,anchor="center")
         self.treeview.column("home_team", width=150)
         self.treeview.column("away_team", width=150)
         self.treeview.column("match_date", width=150)
@@ -111,41 +117,55 @@ class MainMenu(tk.Frame):
         self.treeview.bind("<Double-1>", self.on_fixture_click)
 
     def load_fixtures(self):
-        """Betölti a pre-match mérkőzéseket a Treeview-be és szürkíti a nem választhatókat."""
-        fixtures = get_pre_match_fixtures()
+        """
+        Betölti a mérkőzéseket egyszer, ha még nem töltöttük be,
+        és inicializálja a Treeview-t.
+        """
+        # Csak egyszeri betöltés, például egy attribútumban tárolva az adatokat
+        if not hasattr(self, "fixtures_data"):
+            self.fixtures_data = get_pre_match_fixtures()
+            # Töltsd fel a Treeview-t a fixtures_data alapján
+            for row in self.fixtures_data:
+                fixture_id = row["fixture_id"]
+                home_team = row["home_team"]
+                away_team = row["away_team"]
+                match_date_str = row["match_date"]
+                # Alapértelmezetten minden mérkőzés kiválasztható
+                self.treeview.insert("", "end", values=(fixture_id, home_team, away_team, match_date_str),
+                                     tags=("normal",))
 
-        # Treeview ürítése
-        for item in self.treeview.get_children():
-            self.treeview.delete(item)
+        # Frissítsd a stílusokat a kiválasztott mérkőzések alapján
+        self.update_fixture_styles()
 
-        # Jelenlegi kiválasztott mérkőzések időpontjai
+    def update_fixture_styles(self):
+        """
+        Frissíti a már betöltött mérkőzések stílusát, hogy
+        a nem kiválasztható mérkőzések szürkések legyenek.
+        """
+        # Gyűjtsük össze a kiválasztott mérkőzések dátumait
         selected_times = []
         for fixture in selected_fixtures:
             _, _, _, selected_date_str = fixture
-            selected_datetime = selected_date_str if isinstance(selected_date_str, datetime) else datetime.strptime(selected_date_str, "%Y-%m-%d %H:%M:%S")
+            # Ellenőrizzük, hogy datetime vagy string
+            if isinstance(selected_date_str, datetime):
+                selected_datetime = selected_date_str
+            else:
+                selected_datetime = datetime.strptime(selected_date_str, "%Y-%m-%d %H:%M:%S")
             selected_times.append(selected_datetime)
 
-        # Adatok betöltése
-        if fixtures:
-            for row in fixtures:
-                fixture_id, home_team, away_team, match_date_str = row["fixture_id"], row["home_team"], row["away_team"], row["match_date"]
+        # Frissítsük az egyes Treeview elemeket
+        for item in self.treeview.get_children():
+            fixture_data = self.treeview.item(item, "values")
+            match_date_str = fixture_data[3]
+            match_datetime = datetime.strptime(match_date_str, "%Y-%m-%d %H:%M:%S")
+            # Ellenőrizzük, hogy a mérkőzés kiválasztható-e
+            is_selectable = all(abs((match_datetime - t).total_seconds()) / 3600 >= 2 for t in selected_times)
+            new_tag = "normal" if is_selectable else "disabled"
+            self.treeview.item(item, tags=(new_tag,))
 
-                # Ha a dátum már `datetime` típusú, akkor nem kell konvertálni
-                match_datetime = match_date_str if isinstance(match_date_str, datetime) else datetime.strptime(match_date_str, "%Y-%m-%d %H:%M:%S")
-
-                # Ellenőrizzük, hogy a mérkőzés választható-e (nincs ±2 órán belül másik)
-                is_selectable = all(abs((match_datetime - t).total_seconds()) / 3600 >= 2 for t in selected_times)
-
-                # Szürke háttér a nem választható meccsekhez
-                tag = "disabled" if not is_selectable else "normal"
-
-                # Mérkőzés beszúrása a Treeview-be
-                self.treeview.insert("", "end", values=(fixture_id, home_team, away_team, match_date_str), tags=(tag,))
-
-        print(f"{len(fixtures)} mérkőzés betöltve.")
-
-        # Stílusbeállítás a szürke (nem választható) sorokhoz
-        self.treeview.tag_configure("disabled", background="#d3d3d3", foreground="gray")  # Szürke háttér és szürke szöveg
+        # Stílusok beállítása a tag-ekhez
+        self.treeview.tag_configure("disabled", background="#d3d3d3", foreground="gray")
+        self.treeview.tag_configure("normal", background="white", foreground="black")
 
     def prevent_selection(self, event):
         """Megakadályozza a nem választható mérkőzések kijelölését."""
@@ -187,15 +207,22 @@ class MainMenu(tk.Frame):
         view_selected_button.pack(side="left", padx=5)
 
     def on_fixture_click(self, event):
-        """Kezeli a mérkőzésre való kattintást."""
-        selected_item = self.treeview.selection()[0]
-        fixture_data = self.treeview.item(selected_item, "values")
+        # Ellenőrizzük, hogy a kattintás a fejlécen történt-e
+        region = self.treeview.identify("region", event.x, event.y)
+        if region == "heading":
+            return  # Ha fejléc, akkor nem csinál semmit
 
-        # Adatok kiírása a konzolra (debug)
+        # További kód: csak ha cellára kattintottak, odds ablak megnyitása
+        selected_items = self.treeview.selection()
+        if not selected_items:
+            print("Nincs kiválasztott elem a táblázatban.")
+            return
+
+        selected_item = selected_items[0]
+        fixture_data = self.treeview.item(selected_item, "values")
         print(f"Kiválasztott mérkőzés: {fixture_data}")
 
-        # Odds mentése és megjelenítése
-        fixture_id = fixture_data[0]  # Az első oszlop az `fixture_id`
+        fixture_id = fixture_data[0]
         save_odds_for_fixture(fixture_id)
         self.show_odds_window(fixture_data)
 
@@ -350,25 +377,38 @@ class MainMenu(tk.Frame):
         else:
             selected_window.lift()
 
+
 class SelectedFixturesWindow(tk.Toplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title("Kiválasztott mérkőzések")
         self.geometry("600x400")
+        self.minsize(600, 400)  # Az ablak nem zsugorodhat ennél kisebbre
 
-        # Treeview a kiválasztott mérkőzésekhez
-        self.treeview = ttk.Treeview(self, columns=("fixture_id", "home_team", "away_team", "match_date"), show="headings")
-        self.treeview.heading("fixture_id", text="Mérkőzés ID")
-        self.treeview.heading("home_team", text="Hazai csapat")
-        self.treeview.heading("away_team", text="Vendég csapat")
-        self.treeview.heading("match_date", text="Dátum")
+        # Rendezettségi állapot tárolása az oszlopokhoz
+        self.sort_orders = {"fixture_id": False, "home_team": False, "away_team": False, "match_date": False}
+
+        # Treeview létrehozása
+        self.treeview = ttk.Treeview(self, columns=("fixture_id", "home_team", "away_team", "match_date"),
+                                     show="headings")
+        self.treeview.heading("fixture_id", text="Mérkőzés ID", command=lambda: self.sort_treeview("fixture_id"), anchor="center")
+        self.treeview.heading("home_team", text="Hazai csapat", command=lambda: self.sort_treeview("home_team"))
+        self.treeview.heading("away_team", text="Vendég csapat", command=lambda: self.sort_treeview("away_team"))
+        self.treeview.heading("match_date", text="Dátum", command=lambda: self.sort_treeview("match_date"))
         self.treeview.pack(fill="both", expand=True)
+
+        # Oszlopok beállítása: fix szélesség és minimális szélesség, stretch engedélyezve
+        self.treeview.column("fixture_id", width=100, minwidth=100, stretch=True, anchor="center")
+        self.treeview.column("home_team", width=150, minwidth=150, stretch=True)
+        self.treeview.column("away_team", width=150, minwidth=150, stretch=True)
+        self.treeview.column("match_date", width=150, minwidth=150, stretch=True)
 
         # Gombok hozzáadása
         self.add_buttons()
 
         # Kiválasztott mérkőzések betöltése
         self.load_selected_fixtures()
+
 
     def add_buttons(self):
         """Gombok hozzáadása az ablakhoz."""
@@ -398,25 +438,41 @@ class SelectedFixturesWindow(tk.Toplevel):
         self.load_selected_fixtures()
 
     def delete_selected_fixtures(self):
-        """Eltávolítja a kijelölt mérkőzéseket a listából és frissíti a táblázatot."""
         global selected_fixtures
 
-        # Kijelölt elemek azonosítása
         selected_items = self.treeview.selection()
         for item in selected_items:
             fixture_data = self.treeview.item(item, "values")
             if fixture_data in selected_fixtures:
                 selected_fixtures.remove(fixture_data)
 
-        # Figyelmeztetés, ha nincs kijelölés
         if not selected_items:
             messagebox.showwarning("Figyelmeztetés", "Nem választottál ki törlendő mérkőzést.")
         else:
             messagebox.showinfo("Siker", f"{len(selected_items)} mérkőzés törölve.")
 
-        # Lista frissítése
         self.load_selected_fixtures()
 
-        if isinstance(self.master.app.current_frame, MainMenu):  # Ellenőrizd, hogy a current_frame MainMenu példány-e
-            self.master.app.current_frame.load_fixtures()
+        # Frissítsük a főmenü Treeview stílusát, ha elérhető
+        if isinstance(self.master.app.current_frame, MainMenu):
+            self.master.app.current_frame.update_fixture_styles()
 
+    def sort_treeview(self, column):
+        """Rendezi a Treeview tartalmát az adott oszlop alapján."""
+        self.sort_orders[column] = not self.sort_orders[column]  # Fordítsuk meg a rendezési sorrendet
+        reverse = self.sort_orders[column]
+
+        # A Treeview sorainak lekérdezése és rendezése
+        data = [(self.treeview.set(child, column), child) for child in self.treeview.get_children('')]
+
+        # Megpróbáljuk számként vagy dátumként értelmezni az oszlopokat
+        if column == "fixture_id":
+            data.sort(key=lambda x: int(x[0]), reverse=reverse)
+        elif column == "match_date":
+            data.sort(key=lambda x: datetime.strptime(x[0], "%Y-%m-%d %H:%M:%S"), reverse=reverse)
+        else:
+            data.sort(key=lambda x: x[0].lower(), reverse=reverse)
+
+        # Sorok újra behelyezése rendezett sorrendben
+        for index, (value, item) in enumerate(data):
+            self.treeview.move(item, '', index)
