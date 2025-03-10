@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import mysql.connector
 import requests
 
@@ -567,25 +569,35 @@ def save_bookmakers(bookmakers):
 
 def update_fixtures_status():
     """
-    Frissíti az adatbázisban lévő mérkőzések státuszát és egyéb mezőit az API válaszai alapján,
-    csak ha valóban változás történt.
+    Csak azokat az `NS` státuszú mérkőzéseket frissíti, amelyek már lejártak vagy ma játszódnak.
     """
+
     connection = get_db_connection()
     if connection is None:
         print("Nem sikerült csatlakozni az adatbázishoz.")
         return
 
     cursor = connection.cursor(dictionary=True)
+
     try:
-        # Lekérdezzük az adatbázisból az összes `NS` státuszú mérkőzést
-        query = "SELECT id, status, DATE_FORMAT(date, '%Y-%m-%dT%H:%i:%sZ') as date, score_home, score_away FROM fixtures WHERE status = 'NS'"
+        # **1. Lekérdezzük azokat az `NS` státuszú mérkőzéseket, amelyek már lejártak vagy ma vannak.**
+        query = """
+            SELECT id, status, DATE_FORMAT(date, '%Y-%m-%dT%H:%i:%sZ') as date, score_home, score_away 
+            FROM fixtures 
+            WHERE status = 'NS' AND date <= NOW()
+        """
         cursor.execute(query)
         fixtures = cursor.fetchall()
 
-        for fixture in fixtures:
-            fixture_id = fixture["id"]
+        if not fixtures:
+            print("Nincs frissítendő mérkőzés.")
+            return
 
-            # API lekérdezés a mérkőzés adataiért
+        updates = []
+
+        # **2. Egyenként kérjük le az API-ból az adatokat**
+        for fixture in fixtures:
+            fixture_id = str(fixture["id"])
             url = f"{BASE_URL}fixtures"
             headers = {
                 'x-apisports-key': API_KEY,
@@ -593,66 +605,58 @@ def update_fixtures_status():
             }
             params = {'id': fixture_id, 'timezone': 'Europe/Budapest'}
 
-            try:
-                response = requests.get(url, headers=headers, params=params)
-                response.raise_for_status()
-                data = response.json().get("response", [{}])[0]
+            response = requests.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            api_data = response.json().get("response", [])
 
-                # Kinyerjük az adatokat az API válaszból
-                new_status = data["fixture"]["status"]["short"]
-                new_date = normalize_date(data["fixture"]["date"])
-                home_score = data["score"]["fulltime"].get("home")
-                away_score = data["score"]["fulltime"].get("away")
+            if not api_data:
+                continue  # Ha az API nem adott vissza adatot, lépjünk tovább
 
-                # Normalize értékek összehasonlítás előtt
-                db_status = fixture["status"].strip().upper()
-                api_status = new_status.strip().upper()
-                db_date = fixture["date"]
+            api_fixture = api_data[0]
 
-                db_home_score = fixture["score_home"] if fixture["score_home"] is not None else 0
-                db_away_score = fixture["score_away"] if fixture["score_away"] is not None else 0
-                api_home_score = home_score if home_score is not None else 0
-                api_away_score = away_score if away_score is not None else 0
+            # Új adatok
+            new_status = api_fixture["fixture"]["status"]["short"]
+            new_date = normalize_date(api_fixture["fixture"]["date"])
 
-                # Ellenőrizzük a változásokat
-                changes = []
-                if db_status != api_status:
-                    changes.append(f"status: {db_status} -> {api_status}")
-                if db_date != new_date:
-                    changes.append(f"date: {db_date} -> {new_date}")
-                if db_home_score != api_home_score:
-                    changes.append(f"score_home: {db_home_score} -> {api_home_score}")
-                if db_away_score != api_away_score:
-                    changes.append(f"score_away: {db_away_score} -> {api_away_score}")
+            # **Ellenőrizzük, hogy az eredmény nem None**
+            home_score = api_fixture["score"]["fulltime"].get("home")
+            away_score = api_fixture["score"]["fulltime"].get("away")
 
-                # Csak akkor frissítünk, ha történt változás
-                if changes:
-                    update_query = """
-                        UPDATE fixtures
-                        SET 
-                            status = %s,
-                            date = %s,
-                            score_home = %s,
-                            score_away = %s
-                        WHERE id = %s
-                    """
-                    cursor.execute(update_query, (
-                        new_status,
-                        new_date,
-                        home_score,
-                        away_score,
-                        fixture_id
-                    ))
-                    connection.commit()
-                    print(f"Mérkőzés frissítve: {fixture_id}, változások: {', '.join(changes)}")
-                else:
-                    print(f"Mérkőzés változatlan: {fixture_id}, státusz: {db_status}")
+            # Ha nincs eredmény, állítsuk NULL-ra
+            home_score = home_score if home_score is not None else None
+            away_score = away_score if away_score is not None else None
 
-            except requests.exceptions.RequestException as e:
-                print(f"API hiba a mérkőzés frissítésekor ({fixture_id}): {e}")
+            # **Ellenőrizzük, hogy minden szükséges adat megvan-e**
+            if not all([new_status, new_date, fixture_id]):
+                print(f"HIBA: Hiányzó adatok a mérkőzés frissítéséhez: {fixture_id}")
+                continue
 
-    except mysql.connector.Error as err:
-        print(f"Adatbázis hiba a mérkőzések frissítésekor: {err}")
+            updates.append((new_status, new_date, home_score, away_score, fixture_id))
+
+        # **3. Debug: Ellenőrizzük az updates listát**
+        print(f"Frissítendő mérkőzések száma: {len(updates)}")
+        for update in updates:
+            if len(update) != 5:
+                print(f"HIBA: Hibás tuple méret az updates listában: {update}")
+
+        # **4. Tömbösített adatbázis frissítés, ha van változás**
+        if updates:
+            update_query = """
+                UPDATE fixtures
+                SET 
+                    status = %s,
+                    date = %s,
+                    score_home = %s,
+                    score_away = %s
+                WHERE id = %s
+            """
+            cursor.executemany(update_query, updates)
+            connection.commit()
+            print(f"{len(updates)} mérkőzés frissítve.")
+
+        else:
+            print("Nincs változás az adatbázisban.")
+
     finally:
         cursor.close()
         connection.close()
@@ -713,6 +717,134 @@ def odds_already_saved(fixture_id):
     except mysql.connector.Error as err:
         print(f"Adatbázis hiba: {err}")
         return False
+    finally:
+        cursor.close()
+        connection.close()
+
+def check_simulation_exists(simulation_name):
+    """
+    Ellenőrzi, hogy létezik-e már egy adott nevű szimuláció a match_groups táblában.
+
+    :param simulation_name: A keresett szimuláció neve.
+    :return: True, ha a szimuláció már létezik, különben False.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("Nem sikerült csatlakozni az adatbázishoz.")
+        return False
+
+    cursor = connection.cursor()
+    try:
+        query = "SELECT id FROM match_groups WHERE name = %s"  # ✅ A helyes oszlopnév: name
+        cursor.execute(query, (simulation_name,))
+        result = cursor.fetchone()
+        return result is not None  # True, ha van ilyen név, különben False
+    except mysql.connector.Error as err:
+        print(f"Adatbázis hiba a szimuláció ellenőrzése közben: {err}")
+        return False
+    finally:
+        cursor.close()
+        connection.close()
+
+def save_match_to_group(match_group_id, fixture_id):
+    """
+    Kapcsolótáblába szúrja a mérkőzéseket a megadott mérkőzéscsoport ID-hoz.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("Nem sikerült csatlakozni az adatbázishoz.")
+        return
+
+    cursor = connection.cursor()
+    try:
+        # Ellenőrizzük, hogy a mérkőzés már hozzá van-e rendelve a csoporthoz
+        cursor.execute("""
+            SELECT 1 FROM match_group_fixtures WHERE match_group_id = %s AND fixture_id = %s
+        """, (match_group_id, fixture_id))
+        result = cursor.fetchone()
+
+        if not result:
+            # Ha még nincs benne, akkor beszúrjuk
+            cursor.execute("""
+                INSERT INTO match_group_fixtures (match_group_id, fixture_id) VALUES (%s, %s)
+            """, (match_group_id, fixture_id))
+            connection.commit()
+    except mysql.connector.Error as err:
+        print(f"Adatbázis hiba mérkőzés-csoport mentésénél: {err}")
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def save_match_group(match_group_name):
+    """
+    Ha még nincs ilyen mérkőzéscsoport, létrehozza, majd visszaadja annak ID-ját.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("Nem sikerült csatlakozni az adatbázishoz.")
+        return None
+
+    cursor = connection.cursor()
+    try:
+        # Ellenőrizzük, hogy létezik-e már ilyen nevű mérkőzéscsoport
+        cursor.execute("SELECT id FROM match_groups WHERE name = %s", (match_group_name,))
+        result = cursor.fetchone()
+
+        if result:
+            match_group_id = result[0]  # Ha létezik, visszaadjuk az ID-t
+        else:
+            # Ha nem létezik, létrehozzuk
+            cursor.execute("INSERT INTO match_groups (name) VALUES (%s)", (match_group_name,))
+            connection.commit()
+            match_group_id = cursor.lastrowid  # Az újonnan létrehozott ID
+
+        return match_group_id
+    except mysql.connector.Error as err:
+        print(f"Adatbázis hiba mérkőzéscsoport mentésénél: {err}")
+        return None
+    finally:
+        cursor.close()
+        connection.close()
+
+def load_simulations_from_db():
+    """Lekérdezi az adatbázisból az összes szimulációt."""
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        cursor.execute("SELECT id, name, created_at FROM match_groups ORDER BY created_at DESC")
+        return cursor.fetchall()
+    except mysql.connector.Error as err:
+        print(f"Adatbázis hiba szimulációk lekérdezésekor: {err}")
+        return []
+    finally:
+        cursor.close()
+        connection.close()
+
+def fetch_fixtures_for_simulation(simulation_id):
+    """Lekéri az adott szimulációhoz tartozó mérkőzéseket az adatbázisból."""
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        query = """
+            SELECT f.id AS fixture_id, 
+                   t1.name AS home_team, 
+                   t2.name AS away_team, 
+                   f.date AS match_date
+            FROM match_group_fixtures mgf
+            JOIN fixtures f ON mgf.fixture_id = f.id
+            JOIN teams t1 ON f.home_team_id = t1.id
+            JOIN teams t2 ON f.away_team_id = t2.id
+            WHERE mgf.match_group_id = %s
+        """
+        cursor.execute(query, (simulation_id,))
+        return cursor.fetchall()
+
+    except mysql.connector.Error as err:
+        print(f"Adatbázis hiba mérkőzések lekérdezésekor: {err}")
+        return []
     finally:
         cursor.close()
         connection.close()

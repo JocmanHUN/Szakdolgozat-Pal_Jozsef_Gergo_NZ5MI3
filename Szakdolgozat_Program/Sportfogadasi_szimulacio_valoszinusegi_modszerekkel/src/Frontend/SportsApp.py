@@ -2,8 +2,10 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, messagebox
 from src.Frontend.PastResultsApp import PastResultsApp
+from src.Frontend.SimulationsWindow import SimulationsWindow
 from src.Frontend.TeamsApp import TeamsApp
-from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id, update_fixtures_status
+from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id, update_fixtures_status, \
+    check_simulation_exists, save_match_group, save_match_to_group
 from src.Backend.api_requests import save_pre_match_fixtures, save_odds_for_fixture, fetch_odds_for_fixture, sync_bookmakers
 
 # Globális lista a kiválasztott mérkőzésekhez
@@ -23,8 +25,6 @@ class SportsApp:
 
         # Fogadóirodák szinkronizálása az első indításkor
         self.sync_initial_bookmakers()
-
-        #update_fixtures_status()
 
         self.current_frame = None
         self.show_main_menu()
@@ -203,8 +203,11 @@ class MainMenu(tk.Frame):
         add_button = ttk.Button(button_frame, text="Hozzáadás", command=self.add_to_selected)
         add_button.pack(side="left", padx=5)
 
-        view_selected_button = ttk.Button(button_frame, text="Kiválasztott mérkőzések és szimulációk", command=self.show_selected_fixtures)
+        view_selected_button = ttk.Button(button_frame, text="Kiválasztott mérkőzések és szimuláció indítás", command=self.show_selected_fixtures)
         view_selected_button.pack(side="left", padx=5)
+
+        simulations_button = ttk.Button(button_frame, text="Meglévő szimulációk", command=self.show_simulations)
+        simulations_button.pack(side="left", padx=5)
 
     def on_fixture_click(self, event):
         # Ellenőrizzük, hogy a kattintás a fejlécen történt-e
@@ -242,6 +245,7 @@ class MainMenu(tk.Frame):
             print(f"Oddsok nincsenek mentve, lekérdezés és mentés szükséges: {fixture_id}")
             save_odds_for_fixture(fixture_id)
             odds = get_odds_by_fixture_id(fixture_id)  # Újra lekérjük az adatbázisból
+            print(odds)
 
         # Odds ablak létrehozása
         odds_window = tk.Toplevel(self)
@@ -377,18 +381,24 @@ class MainMenu(tk.Frame):
         else:
             selected_window.lift()
 
+    def show_simulations(self):
+        """Megnyitja a SimulationsWindow-t."""
+        SimulationsWindow(self)
+
+# Globális lista a kiválasztott mérkőzésekhez
+selected_fixtures = []
 
 class SelectedFixturesWindow(tk.Toplevel):
     def __init__(self, master):
         super().__init__(master)
-        self.title("Kiválasztott mérkőzések")
-        self.geometry("600x400")
-        self.minsize(600, 400)  # Az ablak nem zsugorodhat ennél kisebbre
+        self.title("Kiválasztott mérkőzések és szimuláció")
+        self.geometry("600x500")
+        self.minsize(600, 500)  # Az ablak minimális mérete
 
         # Rendezettségi állapot tárolása az oszlopokhoz
         self.sort_orders = {"fixture_id": False, "home_team": False, "away_team": False, "match_date": False}
 
-        # Treeview létrehozása
+        # Treeview létrehozása a mérkőzések listájának megjelenítéséhez
         self.treeview = ttk.Treeview(self, columns=("fixture_id", "home_team", "away_team", "match_date"),
                                      show="headings")
         self.treeview.heading("fixture_id", text="Mérkőzés ID", command=lambda: self.sort_treeview("fixture_id"), anchor="center")
@@ -397,29 +407,42 @@ class SelectedFixturesWindow(tk.Toplevel):
         self.treeview.heading("match_date", text="Dátum", command=lambda: self.sort_treeview("match_date"))
         self.treeview.pack(fill="both", expand=True)
 
-        # Oszlopok beállítása: fix szélesség és minimális szélesség, stretch engedélyezve
+        # Oszlopok beállítása
         self.treeview.column("fixture_id", width=100, minwidth=100, stretch=True, anchor="center")
         self.treeview.column("home_team", width=150, minwidth=150, stretch=True)
         self.treeview.column("away_team", width=150, minwidth=150, stretch=True)
         self.treeview.column("match_date", width=150, minwidth=150, stretch=True)
 
-        # Gombok hozzáadása
-        self.add_buttons()
+        # Gombok és textbox hozzáadása
+        self.add_widgets()
 
         # Kiválasztott mérkőzések betöltése
         self.load_selected_fixtures()
 
+    def add_widgets(self):
+        """Hozzáadja a gombokat és a textboxot az ablakhoz."""
+        frame = tk.Frame(self)
+        frame.pack(pady=10)
 
-    def add_buttons(self):
-        """Gombok hozzáadása az ablakhoz."""
+        # Textbox a mérkőzéscsoport nevének megadásához
+        self.match_group_name_label = ttk.Label(frame, text="Mérkőzéscsoport neve:")
+        self.match_group_name_label.pack(side="left", padx=5)
+
+        self.match_group_name_entry = ttk.Entry(frame, width=20)
+        self.match_group_name_entry.pack(side="left", padx=5)
+
+        # Gombok hozzáadása
         button_frame = tk.Frame(self)
         button_frame.pack(pady=10)
 
-        delete_button = ttk.Button(button_frame, text="Törlés", command=self.delete_selected_fixtures)
-        delete_button.pack(side="left", padx=5)
+        self.simulate_button = ttk.Button(button_frame, text="Szimuláció futtatása", command=self.run_simulation)
+        self.simulate_button.pack(side="left", padx=5)
 
-        close_button = ttk.Button(button_frame, text="Bezárás", command=self.destroy)
-        close_button.pack(side="left", padx=5)
+        self.delete_button = ttk.Button(button_frame, text="Törlés", command=self.delete_selected_fixtures)
+        self.delete_button.pack(side="left", padx=5)
+
+        self.close_button = ttk.Button(button_frame, text="Bezárás", command=self.destroy)
+        self.close_button.pack(side="left", padx=5)
 
     def load_selected_fixtures(self):
         """Betölti a kiválasztott mérkőzéseket a táblázatba."""
@@ -432,10 +455,6 @@ class SelectedFixturesWindow(tk.Toplevel):
         # Új sorok hozzáadása
         for fixture in selected_fixtures:
             self.treeview.insert("", "end", values=fixture)
-
-    def refresh_selected_fixtures(self):
-        """Frissíti a kiválasztott mérkőzések táblázatának tartalmát."""
-        self.load_selected_fixtures()
 
     def delete_selected_fixtures(self):
         global selected_fixtures
@@ -457,6 +476,54 @@ class SelectedFixturesWindow(tk.Toplevel):
         if isinstance(self.master.app.current_frame, MainMenu):
             self.master.app.current_frame.update_fixture_styles()
 
+        self.lift()
+        self.focus_force()
+
+    def run_simulation(self):
+        """Szimuláció futtatása a kiválasztott mérkőzésekkel."""
+        global selected_fixtures
+
+        match_group_name = self.match_group_name_entry.get().strip()
+
+        if not match_group_name:
+            messagebox.showwarning("Figyelmeztetés", "Adj meg egy nevet a mérkőzéscsoportnak!")
+            return
+
+        num_fixtures = len(selected_fixtures)
+
+        """if num_fixtures < 10:
+            messagebox.showwarning("Figyelmeztetés",
+                                   "Legalább 10 mérkőzést kell kiválasztanod a szimuláció futtatásához!")
+            return"""
+
+        if num_fixtures > 25:
+            messagebox.showwarning("Figyelmeztetés", "Legfeljebb 25 mérkőzést választhatsz ki egy szimulációhoz!")
+            return
+
+        # Ellenőrizzük, hogy létezik-e már ilyen nevű szimuláció
+        if check_simulation_exists(match_group_name):
+            messagebox.showerror("Hiba", f"Már létezik egy szimuláció ezzel a névvel: '{match_group_name}'!")
+            return
+
+        # Itt történik meg az adatok mentése az adatbázisba
+        self.save_simulation_to_database(match_group_name, selected_fixtures)
+
+        self.destroy()
+
+    def save_simulation_to_database(self, match_group_name, fixtures):
+        """
+        A felhasználói interfész meghívja ezt a függvényt, amikor a szimulációt menteni kell.
+        """
+        # 1️⃣ Mérkőzéscsoport létrehozása vagy visszakeresése
+        match_group_id = save_match_group(match_group_name)
+
+        # 2️⃣ Minden kiválasztott mérkőzést hozzáadunk ehhez a csoporthoz
+        for fixture in fixtures:
+            fixture_id = fixture[0]  # Az első érték a mérkőzés ID-ja
+            save_match_to_group(match_group_id, fixture_id)
+
+        messagebox.showinfo("Siker", f"A '{match_group_name}' nevű mérkőzéscsoport sikeresen mentve!")
+
     def sort_treeview(self, column):
         """Rendezi a Treeview tartalmát az adott oszlop alapján."""
         self.sort_orders[column] = not self.sort_orders[column]  # Fordítsuk meg a rendezési sorrendet
@@ -465,7 +532,6 @@ class SelectedFixturesWindow(tk.Toplevel):
         # A Treeview sorainak lekérdezése és rendezése
         data = [(self.treeview.set(child, column), child) for child in self.treeview.get_children('')]
 
-        # Megpróbáljuk számként vagy dátumként értelmezni az oszlopokat
         if column == "fixture_id":
             data.sort(key=lambda x: int(x[0]), reverse=reverse)
         elif column == "match_date":
@@ -473,6 +539,5 @@ class SelectedFixturesWindow(tk.Toplevel):
         else:
             data.sort(key=lambda x: x[0].lower(), reverse=reverse)
 
-        # Sorok újra behelyezése rendezett sorrendben
         for index, (value, item) in enumerate(data):
             self.treeview.move(item, '', index)
