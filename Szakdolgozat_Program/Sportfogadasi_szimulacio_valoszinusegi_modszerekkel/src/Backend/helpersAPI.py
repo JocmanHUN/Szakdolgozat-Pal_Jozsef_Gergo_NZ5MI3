@@ -379,6 +379,7 @@ def get_or_create_team(team_id, team_name, country, logo):
     else:
         print(f"Csapat már létezik: {team_name}")
 
+
 def get_team_id_by_name(team_name):
     """Lekéri a csapat azonosítóját a neve alapján az adatbázisból."""
     connection = get_db_connection()
@@ -390,6 +391,7 @@ def get_team_id_by_name(team_name):
         query = "SELECT id FROM teams WHERE name = %s"
         cursor.execute(query, (team_name,))
         result = cursor.fetchone()
+
         if result:
             return result[0]  # A csapat azonosítója
         else:
@@ -398,8 +400,11 @@ def get_team_id_by_name(team_name):
         print(f"Database read error for team: {err}")
         return None
     finally:
-        cursor.close()
-        connection.close()
+        if cursor:
+            cursor.close()  # Bezárjuk a kurzort
+        if connection:
+            connection.close()  # Bezárjuk az adatbázis kapcsolatot
+
 
 def write_to_odds(odds_data):
     """
@@ -849,3 +854,97 @@ def fetch_fixtures_for_simulation(simulation_id):
         cursor.close()
         connection.close()
 
+def get_last_10_matches(team_id):
+    """
+    Lekéri egy csapat utolsó 10 mérkőzését az adatbázisból.
+
+    :param team_id: A csapat azonosítója.
+    :return: Lista a csapat legutóbbi 10 mérkőzéséről.
+    """
+
+    connection = get_db_connection()
+    if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz.")
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        query = """
+                SELECT f.id, f.date, 
+                       f.home_team_id, ht.name AS home_team_name, 
+                       f.away_team_id, at.name AS away_team_name, 
+                       f.score_home, f.score_away, f.status
+                FROM fixtures f
+                JOIN teams ht ON f.home_team_id = ht.id
+                JOIN teams at ON f.away_team_id = at.id
+                WHERE (f.home_team_id = %s OR f.away_team_id = %s) 
+                AND f.date < NOW()
+                ORDER BY f.date DESC
+                LIMIT 10
+            """
+        cursor.execute(query, (team_id, team_id))
+        matches = cursor.fetchall()
+
+        if not matches:
+            print(f"⚠️ Nincs elég múltbeli mérkőzés az adatbázisban (Csapat ID: {team_id}).")
+        else:
+            print(f"✅ {len(matches)} mérkőzés található az adatbázisban (Csapat ID: {team_id}).")
+
+        return matches
+
+    except mysql.connector.Error as err:
+        print(f"❌ Adatbázis hiba a mérkőzések lekérdezésekor: {err}")
+        return []
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def read_head_to_head_stats(home_team_id, away_team_id):
+    """
+    Lekérdezi az utolsó 5 egymás elleni mérkőzést a fixtures táblából.
+
+    :param home_team_id: Hazai csapat ID.
+    :param away_team_id: Vendég csapat ID.
+    :return: Lista az utolsó 5 mérkőzésről, ahol a két csapat játszott egymás ellen.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz.")
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+    try:
+        query = """
+            SELECT f.id, f.date, 
+                   f.home_team_id, ht.name AS home_team_name, 
+                   f.away_team_id, at.name AS away_team_name, 
+                   f.score_home, f.score_away, f.status
+            FROM fixtures f
+            JOIN teams ht ON f.home_team_id = ht.id
+            JOIN teams at ON f.away_team_id = at.id
+            WHERE ((f.home_team_id = %s AND f.away_team_id = %s) 
+                OR (f.home_team_id = %s AND f.away_team_id = %s))
+                AND f.date < NOW()
+            ORDER BY f.date DESC
+            LIMIT 5
+        """
+        cursor.execute(query, (home_team_id, away_team_id, away_team_id, home_team_id))
+        h2h_matches = cursor.fetchall()
+
+        if not h2h_matches:
+            print(f"⚠️ Nincs elérhető H2H mérkőzés az adatbázisban ({home_team_id} vs {away_team_id}).")
+        else:
+            print(f"✅ {len(h2h_matches)} H2H mérkőzés található az adatbázisban ({home_team_id} vs {away_team_id}).")
+
+        return h2h_matches
+
+    except mysql.connector.Error as err:
+        print(f"❌ Adatbázis hiba H2H statisztikák lekérdezésekor: {err}")
+        return []
+
+    finally:
+        cursor.close()
+        connection.close()

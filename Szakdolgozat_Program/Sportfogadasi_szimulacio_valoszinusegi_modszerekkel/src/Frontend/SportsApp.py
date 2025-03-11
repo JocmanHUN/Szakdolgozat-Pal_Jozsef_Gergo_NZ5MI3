@@ -5,8 +5,9 @@ from src.Frontend.PastResultsApp import PastResultsApp
 from src.Frontend.SimulationsWindow import SimulationsWindow
 from src.Frontend.TeamsApp import TeamsApp
 from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id, update_fixtures_status, \
-    check_simulation_exists, save_match_group, save_match_to_group
-from src.Backend.api_requests import save_pre_match_fixtures, save_odds_for_fixture, fetch_odds_for_fixture, sync_bookmakers
+    check_simulation_exists, save_match_group, save_match_to_group, get_team_id_by_name
+from src.Backend.api_requests import save_pre_match_fixtures, save_odds_for_fixture, fetch_odds_for_fixture, \
+    sync_bookmakers, ensure_simulation_data_available
 
 # Globális lista a kiválasztott mérkőzésekhez
 selected_fixtures = []
@@ -491,11 +492,6 @@ class SelectedFixturesWindow(tk.Toplevel):
 
         num_fixtures = len(selected_fixtures)
 
-        """if num_fixtures < 10:
-            messagebox.showwarning("Figyelmeztetés",
-                                   "Legalább 10 mérkőzést kell kiválasztanod a szimuláció futtatásához!")
-            return"""
-
         if num_fixtures > 25:
             messagebox.showwarning("Figyelmeztetés", "Legfeljebb 25 mérkőzést választhatsz ki egy szimulációhoz!")
             return
@@ -505,8 +501,40 @@ class SelectedFixturesWindow(tk.Toplevel):
             messagebox.showerror("Hiba", f"Már létezik egy szimuláció ezzel a névvel: '{match_group_name}'!")
             return
 
-        # Itt történik meg az adatok mentése az adatbázisba
+        # 🔍 **Csapatnevekből ID-ket keresünk**
+        fixture_list = []
+        for fixture in selected_fixtures:
+            fixture_id = fixture[0]  # Mérkőzés azonosítója
+            home_team_name = fixture[1]  # Hazai csapat neve
+            away_team_name = fixture[2]  # Vendég csapat neve
+
+            # ✅ Nevekből ID-k lekérése
+            home_team_id = get_team_id_by_name(home_team_name)
+            away_team_id = get_team_id_by_name(away_team_name)
+
+            if home_team_id is None or away_team_id is None:
+                print(f"❌ Hiba: Nem található az egyik csapat az adatbázisban: {home_team_name} vs {away_team_name}")
+                messagebox.showerror("Hiba",
+                                     f"Nem található csapat az adatbázisban: {home_team_name} vagy {away_team_name}")
+                continue  # Ha nincs meg az ID, nem tesszük bele a listába
+
+            fixture_list.append((home_team_id, away_team_id, fixture_id))
+
+        # ⚠️ Ha nincs egyetlen érvényes mérkőzés sem, akkor nem hívjuk meg a függvényt
+        if not fixture_list:
+            print("⚠️ Nincsenek érvényes mérkőzések az adatbázisban. Ellenőrizd a csapatneveket!")
+            messagebox.showwarning("Figyelmeztetés", "Nem található érvényes mérkőzés. Ellenőrizd a csapatneveket!")
+            return
+
+        # 🚀 **Biztosítjuk az adatok elérhetőségét a szimulációhoz**
+        print(f"🔄 Adatok biztosítása a szimulációhoz: {match_group_name}")
+        ensure_simulation_data_available(fixture_list)  # Premier League ID és szezon megadása
+
         self.save_simulation_to_database(match_group_name, selected_fixtures)
+        selected_fixtures.clear()
+        # Frissítsük a főmenü Treeview stílusát, ha elérhető
+        if isinstance(self.master.app.current_frame, MainMenu):
+            self.master.app.current_frame.update_fixture_styles()
 
         self.destroy()
 

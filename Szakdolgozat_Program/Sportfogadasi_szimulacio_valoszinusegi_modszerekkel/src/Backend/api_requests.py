@@ -1,6 +1,6 @@
 # api_requests.py
 from datetime import datetime, timedelta
-
+from dateutil import parser
 import pytz
 import requests
 from src.config import API_KEY, BASE_URL, HOST
@@ -9,7 +9,8 @@ from src.Backend.helpersAPI import (
     write_to_teams, read_from_teams,
     write_to_fixtures, read_from_fixtures,
     write_to_match_statistics, read_from_match_statistics, write_to_odds, get_odds_by_fixture_id, save_bookmakers,
-    odds_already_saved, read_from_bookmakers
+    odds_already_saved, read_from_bookmakers, get_last_10_matches, read_odds_by_fixture, get_or_create_team,
+    read_head_to_head_stats
 )
 
 def get_leagues():
@@ -195,42 +196,6 @@ def get_match_statistics(match_id, league_name=None, home_team=None, away_team=N
         print(f"API hiba történt: {e}")
         return []
 
-def get_team_statistics(league_id, season, team_id, date=None):
-    """
-    Lekéri egy csapat statisztikáit egy adott liga és szezon alapján.
-    :param league_id: A liga azonosítója.
-    :param season: A szezon éve (YYYY formátumban).
-    :param team_id: A csapat azonosítója.
-    :param date: Opcionális dátum a statisztikák limitálásához.
-    :return: A csapat statisztikái.
-    """
-    url = f"{BASE_URL}teams/statistics"
-    headers = {
-        'x-apisports-key': API_KEY,
-        'x-rapidapi-host': HOST
-    }
-    params = {
-        'league': league_id,
-        'season': season,
-        'team': team_id
-    }
-
-    if date:
-        params['date'] = date  # Dátum hozzáadása, ha van
-
-    try:
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        data = response.json().get('response', {})
-
-        # Itt kezelheted a csapat statisztikák mentését az adatbázisba
-        # Például, ha az API válasz tartalmaz statisztikákat, akkor azt elmentheted:
-        # write_to_team_statistics(data)
-        # Az implementáció a konkrét API válasz struktúrájától függ
-        return data
-    except requests.exceptions.RequestException as e:
-        print(f"API hiba történt a csapat statisztikáinak lekérésekor: {e}")
-        return {}
 
 def fetch_pre_match_fixtures(league_id, season):
     """
@@ -431,5 +396,250 @@ def sync_bookmakers(api_response):
     else:
         print("Nincsenek új vagy frissítendő fogadóirodák.")
 
+def ensure_simulation_data_available(fixture_list):
+    """
+    Biztosítja, hogy a modellekhez szükséges adatok rendelkezésre álljanak az adatbázisban.
+    Ha hiányoznak, az API-ból lekérdezi és elmenti azokat.
+
+    :param fixture_list: Mérkőzések listája ([(home_team_id, away_team_id, fixture_id), ...]).
+    :param league_id: A liga azonosítója.
+    :param season: Az aktuális szezon.
+    """
+    for home_team_id, away_team_id, fixture_id in fixture_list:
+        print(f"\n🔎 **Adatok biztosítása a mérkőzéshez: {home_team_id} vs {away_team_id}** (Fixture ID: {fixture_id})")
+
+        # **Csapatok utolsó 10 mérkőzésének és statisztikáinak biztosítása**
+        for team_id in [home_team_id, away_team_id]:
+            matches = get_last_10_matches(team_id)
+            if len(matches) < 10:
+                print(f"⚠️ Nincs elég múltbeli meccs (Csapat ID: {team_id}), API lekérés...")
+                api_matches = get_fixtures_for_team(team_id, 10)
+                if api_matches:
+                    write_to_fixtures(api_matches)
+                    print(f"✅ {len(api_matches)} mérkőzés elmentve (Csapat ID: {team_id}).")
+
+                    # **Mérkőzés statisztikák biztosítása**
+                    for match in api_matches:
+                        if not read_from_match_statistics(match["id"]):
+                            print(f"⚠️ Hiányzó statisztikák mérkőzéshez: {match['id']}, API lekérés...")
+                            stats = get_match_statistics(match["id"])
+                            if stats:
+                                print(f"✅ Statisztikák elmentve mérkőzéshez: {match['id']}")
+                            else:
+                                print(f"❌ Nem sikerült lekérni a statisztikákat: {match['id']}")
+                else:
+                    print(f"❌ API-ból sem sikerült lekérni az adatokat a csapathoz: {team_id}")
+
+        # **Head-to-head statisztikák biztosítása**
+        h2h_matches = read_head_to_head_stats(home_team_id, away_team_id)
+        if h2h_matches:
+            latest_h2h_date = max(match["date"] for match in h2h_matches)  # Legfrissebb H2H meccs dátuma
+            print(f"🔎 Utolsó H2H mérkőzés dátuma az adatbázisban: {latest_h2h_date}")
+        else:
+            latest_h2h_date = None
+
+        # **Lekérjük az API-ból az utolsó 5 H2H mérkőzést**
+        h2h_stats = get_head_to_head_stats(home_team_id, away_team_id)
+        if h2h_stats:
+            # **Kiszűrjük a frissebb mérkőzéseket**
+            new_h2h_matches = [
+                match for match in h2h_stats
+                if latest_h2h_date is None or parser.isoparse(match["date"]).replace(tzinfo=None) > latest_h2h_date.replace(tzinfo=None)
+            ]
+
+            if new_h2h_matches:
+                print(f"✅ {len(new_h2h_matches)} új H2H mérkőzés elmentése ({home_team_id} vs {away_team_id})")
+                write_to_fixtures(new_h2h_matches)
+
+                # **H2H mérkőzések statisztikáinak biztosítása**
+                for match in new_h2h_matches:
+                    if not read_from_match_statistics(match["id"]):
+                        print(f"⚠️ Hiányzó statisztikák H2H mérkőzéshez: {match['id']}, API lekérés...")
+                        stats = get_match_statistics(match["id"])
+                        if stats:
+                            print(f"✅ Statisztikák elmentve H2H mérkőzéshez: {match['id']}")
+                        else:
+                            print(f"❌ Nem sikerült lekérni a statisztikákat: {match['id']}")
+            else:
+                print(f"🔵 Nincsenek újabb H2H mérkőzések az adatbázishoz képest.")
+        else:
+            print(f"❌ Nem sikerült lekérni a H2H statisztikákat: {home_team_id} vs {away_team_id}")
+
+        if not read_odds_by_fixture(fixture_id):
+            print(f"⚠️ Hiányzó oddsok: {fixture_id}, API lekérés...")
+            odds = fetch_odds_for_fixture(fixture_id)
+            if odds:
+                processed_odds = []
+                for bookmaker in odds:  # A fogadóirodákat tartalmazó lista
+                    for bet in bookmaker.get("bookmakers", []):
+                        for bet_option in bet.get("bets", []):
+                            if bet_option.get("name") == "Match Winner":
+                                processed_odds.append({
+                                    "fixture_id": fixture_id,
+                                    "bookmaker_id": bet["id"],
+                                    "home_odds": bet_option["values"][0]["odd"],
+                                    "draw_odds": bet_option["values"][1]["odd"],
+                                    "away_odds": bet_option["values"][2]["odd"],
+                                    "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                })
+
+                if processed_odds:
+                    write_to_odds(processed_odds)  # Oddsok mentése
+                    print(f"✅ Oddsok elmentve a mérkőzéshez: {fixture_id}")
+                else:
+                    print(f"❌ Nem sikerült oddsokat feldolgozni: {fixture_id}")
+            else:
+                print(f"❌ Nem sikerült lekérni az oddsokat: {fixture_id}")
+
+    print("\n✅ **Minden szükséges adat elérhető! A szimuláció futtatható.** 🚀")
 
 
+def get_fixtures_for_team(team_id, limit=10):
+    """
+    Lekéri az API-ból egy adott csapat utolsó N mérkőzését, és elmenti az adatbázisba.
+
+    :param team_id: A csapat azonosítója.
+    :param limit: Hány mérkőzést kérjen le az API-ból (alapértelmezés: 10).
+    :return: Lista a csapat utolsó mérkőzéseiről.
+    """
+
+    url = f"{BASE_URL}fixtures"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {
+        'team': team_id,
+        'last': limit,
+        'timezone': 'Europe/Budapest' # Legfrissebb mérkőzések először
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        if 'response' not in data or not data['response']:
+            print(f"⚠️ Nincsenek múltbeli mérkőzések az API-ban (Csapat ID: {team_id}).")
+            return []
+
+        fixtures = []
+        for fixture in data['response']:
+            match_data = {
+                "id": fixture['fixture']['id'],
+                "date": fixture['fixture']['date'],
+                "home_team_id": fixture['teams']['home']['id'],
+                "home_team_name": fixture['teams']['home']['name'],
+                "home_team_country": fixture['league'].get('country', 'Unknown'),
+                "home_team_logo": fixture['teams']['home']['logo'],
+                "away_team_id": fixture['teams']['away']['id'],
+                "away_team_name": fixture['teams']['away']['name'],
+                "away_team_country": fixture['league'].get('country', 'Unknown'),
+                "away_team_logo": fixture['teams']['away']['logo'],
+                "score_home": fixture['score']['fulltime']['home'],
+                "score_away": fixture['score']['fulltime']['away'],
+                "status": fixture['fixture']['status']['short'],
+            }
+            fixtures.append(match_data)
+
+        return fixtures
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API hiba történt mérkőzések lekérdezésekor: {e}")
+        return []
+
+
+def get_head_to_head_stats(home_team_id, away_team_id):
+    """
+    Lekéri az API-ból az utolsó 5 egymás elleni mérkőzést és elmenti az adatbázisba.
+
+    :param home_team_id: Hazai csapat ID.
+    :param away_team_id: Vendég csapat ID.
+    :return: Lista az utolsó 5 H2H mérkőzésről.
+    """
+    url = f"{BASE_URL}fixtures/headtohead"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {
+        'h2h': f"{home_team_id}-{away_team_id}",
+        'last': 5,  # Az utolsó 5 mérkőzés
+        'timezone': 'Europe/Budapest'
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        if 'response' not in data or not data['response']:
+            print(f"⚠️ Nincsenek H2H statisztikák az API-ban ({home_team_id} vs {away_team_id}).")
+            return []
+
+        h2h_stats = [
+            {
+                "id": fixture['fixture']['id'],
+                "date": fixture['fixture']['date'],
+                "home_team_id": fixture['teams']['home']['id'],
+                "home_team_name": fixture['teams']['home']['name'],
+                "home_team_country": fixture['league'].get('country', 'Unknown'),
+                "home_team_logo": fixture['teams']['home']['logo'],
+                "away_team_id": fixture['teams']['away']['id'],
+                "away_team_name": fixture['teams']['away']['name'],
+                "away_team_country": fixture['league'].get('country', 'Unknown'),
+                "away_team_logo": fixture['teams']['away']['logo'],
+                "score_home": fixture['score']['fulltime'].get('home', 0),
+                "score_away": fixture['score']['fulltime'].get('away', 0),
+                "status": fixture['fixture']['status']['short']
+            }
+            for fixture in data['response']
+        ]
+
+        # Az adatok mentése az adatbázisba a write_to_fixtures függvénnyel
+        write_to_fixtures(h2h_stats)
+        print(f"✅ {len(h2h_stats)} H2H mérkőzés sikeresen elmentve ({home_team_id} vs {away_team_id}).")
+
+        return h2h_stats
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API hiba történt H2H statisztikák lekérésekor: {e}")
+        return []
+
+
+def get_team_statistics(league_id, season, team_id, date=None):
+    """
+    Lekéri egy csapat statisztikáit egy adott liga és szezon alapján.
+    :param league_id: A liga azonosítója.
+    :param season: A szezon éve (YYYY formátumban).
+    :param team_id: A csapat azonosítója.
+    :param date: Opcionális dátum a statisztikák limitálásához.
+    :return: A csapat statisztikái.
+    """
+    url = f"{BASE_URL}teams/statistics"
+    headers = {
+        'x-apisports-key': API_KEY,
+        'x-rapidapi-host': HOST
+    }
+    params = {
+        'league': league_id,
+        'season': season,
+        'team': team_id
+    }
+
+    if date:
+        params['date'] = date  # Dátum hozzáadása, ha van
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        data = response.json().get('response', {})
+
+        # Itt kezelheted a csapat statisztikák mentését az adatbázisba
+        # Például, ha az API válasz tartalmaz statisztikákat, akkor azt elmentheted:
+        # write_to_team_statistics(data)
+        # Az implementáció a konkrét API válasz struktúrájától függ
+        return data
+    except requests.exceptions.RequestException as e:
+        print(f"API hiba történt a csapat statisztikáinak lekérésekor: {e}")
+        return {}
