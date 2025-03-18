@@ -9,8 +9,8 @@ from src.Backend.helpersAPI import (
     write_to_teams, read_from_teams,
     write_to_fixtures, read_from_fixtures,
     write_to_match_statistics, read_from_match_statistics, write_to_odds, get_odds_by_fixture_id, save_bookmakers,
-    odds_already_saved, read_from_bookmakers, get_last_10_matches, read_odds_by_fixture, get_or_create_team,
-    read_head_to_head_stats
+    odds_already_saved, read_from_bookmakers, get_last_matches, read_odds_by_fixture, get_or_create_team,
+    read_head_to_head_stats, get_existing_h2h_matches, check_h2h_match_exists
 )
 
 def get_leagues():
@@ -158,7 +158,7 @@ def get_fixtures(league_id, season, from_date=None, to_date=None, team_id=None, 
         return []
 
 
-def get_match_statistics(match_id, league_name=None, home_team=None, away_team=None, formatted_date=None):
+def get_match_statistics(match_id):
     # Először ellenőrizzük az adatbázisban, hogy a statisztikák már léteznek-e
     db_statistics = read_from_match_statistics(match_id)  # Ez a függvény lekéri az adatokat az adatbázisból
     if db_statistics:
@@ -338,35 +338,42 @@ def fetch_bookmakers_from_odds(odds_response):
             bookmakers[bookmaker["id"]] = bookmaker["name"]
     return bookmakers
 
+
 def save_odds_for_fixture(fixture_id):
-    # Ellenőrizzük, hogy az odds már el van-e mentve
     if odds_already_saved(fixture_id):
-        print(f"Az odds már el van mentve a mérkőzéshez: {fixture_id}, nem mentünk újra.")
+        print(f"Az odds már el van mentve a mérkőzéshez: {fixture_id}")
         return
 
     odds = fetch_odds_for_fixture(fixture_id)
-    print(odds)  # Debug célból, ellenőrizd a visszakapott oddsokat
-    if not odds:
+    if not odds or "bookmakers" not in odds[0]:
         print(f"Nincs odds a mérkőzéshez: {fixture_id}")
         return
 
     bookmakers = fetch_bookmakers_from_odds(odds)
-    save_bookmakers(bookmakers)  # Fogadóirodák mentése az adatbázisba
+    save_bookmakers(bookmakers)
 
     odds_to_save = []
     for bookmaker in odds[0]["bookmakers"]:
+        if "bets" not in bookmaker:
+            continue
+
         for bet in bookmaker["bets"]:
-            if bet["name"] == "Match Winner":
-                odds_to_save.append({
+            if bet["name"] == "Match Winner" and len(bet["values"]) >= 3:
+                odds_entry = {
                     "fixture_id": fixture_id,
                     "bookmaker_id": bookmaker["id"],
                     "home_odds": bet["values"][0]["odd"],
                     "draw_odds": bet["values"][1]["odd"],
                     "away_odds": bet["values"][2]["odd"],
                     "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                })
-    write_to_odds(odds_to_save)
-    print(f"Odds mentve a mérkőzéshez: {fixture_id}")
+                }
+                odds_to_save.append(odds_entry)
+
+    if odds_to_save:
+        write_to_odds(odds_to_save)
+        print(f"{len(odds_to_save)} odds mentve.")
+    else:
+        print(f"Nincs érvényes 'Match Winner' odds a mérkőzéshez: {fixture_id}")
 
 
 def sync_bookmakers(api_response):
@@ -396,7 +403,7 @@ def sync_bookmakers(api_response):
     else:
         print("Nincsenek új vagy frissítendő fogadóirodák.")
 
-def ensure_simulation_data_available(fixture_list):
+def ensure_simulation_data_available(fixture_list, num_matches=10):
     """
     Biztosítja, hogy a modellekhez szükséges adatok rendelkezésre álljanak az adatbázisban.
     Ha hiányoznak, az API-ból lekérdezi és elmenti azokat.
@@ -410,10 +417,10 @@ def ensure_simulation_data_available(fixture_list):
 
         # **Csapatok utolsó 10 mérkőzésének és statisztikáinak biztosítása**
         for team_id in [home_team_id, away_team_id]:
-            matches = get_last_10_matches(team_id)
+            matches = get_last_matches(team_id,away_team_id, num_matches)
             if len(matches) < 10:
                 print(f"⚠️ Nincs elég múltbeli meccs (Csapat ID: {team_id}), API lekérés...")
-                api_matches = get_fixtures_for_team(team_id, 10)
+                api_matches = get_fixtures_for_team(team_id,num_matches)
                 if api_matches:
                     write_to_fixtures(api_matches)
                     print(f"✅ {len(api_matches)} mérkőzés elmentve (Csapat ID: {team_id}).")
@@ -441,12 +448,14 @@ def ensure_simulation_data_available(fixture_list):
         # **Lekérjük az API-ból az utolsó 5 H2H mérkőzést**
         h2h_stats = get_head_to_head_stats(home_team_id, away_team_id)
         if h2h_stats:
-            # **Kiszűrjük a frissebb mérkőzéseket**
             new_h2h_matches = [
                 match for match in h2h_stats
-                if latest_h2h_date is None or parser.isoparse(match["date"]).replace(tzinfo=None) > latest_h2h_date.replace(tzinfo=None)
+                if latest_h2h_date is None or (
+                        (parser.isoparse(match["date"]) if isinstance(match["date"], str) else match["date"]).replace(
+                            tzinfo=None)
+                        > latest_h2h_date.replace(tzinfo=None)
+                )
             ]
-
             if new_h2h_matches:
                 print(f"✅ {len(new_h2h_matches)} új H2H mérkőzés elmentése ({home_team_id} vs {away_team_id})")
                 write_to_fixtures(new_h2h_matches)
@@ -549,22 +558,29 @@ def get_fixtures_for_team(team_id, limit=10):
         return []
 
 
+
 def get_head_to_head_stats(home_team_id, away_team_id):
     """
     Lekéri az API-ból az utolsó 5 egymás elleni mérkőzést és elmenti az adatbázisba.
-
-    :param home_team_id: Hazai csapat ID.
-    :param away_team_id: Vendég csapat ID.
-    :return: Lista az utolsó 5 H2H mérkőzésről.
+    Ha az adatok már léteznek, akkor nem hívja újra az API-t, hanem az adatbázisból lekéri.
     """
-    url = f"{BASE_URL}fixtures/headtohead"
+    # 🔹 Megpróbáljuk először az adatbázisból lekérni az adatokat
+    existing_h2h_matches = get_existing_h2h_matches(home_team_id, away_team_id)
+
+    # 🔹 Ha már van legalább 5 H2H meccs az adatbázisban, visszaadjuk azokat
+    if len(existing_h2h_matches) >= 5:
+        print(f"✅ H2H statisztikák már léteznek ({home_team_id} vs {away_team_id}).")
+        return existing_h2h_matches
+
+    # 🔹 Ha nincs elég adat, akkor API hívás
+    url = f"{BASE_URL}/fixtures/headtohead"
     headers = {
         'x-apisports-key': API_KEY,
         'x-rapidapi-host': HOST
     }
     params = {
         'h2h': f"{home_team_id}-{away_team_id}",
-        'last': 5,  # Az utolsó 5 mérkőzés
+        'last': 5,
         'timezone': 'Europe/Budapest'
     }
 
@@ -575,11 +591,18 @@ def get_head_to_head_stats(home_team_id, away_team_id):
 
         if 'response' not in data or not data['response']:
             print(f"⚠️ Nincsenek H2H statisztikák az API-ban ({home_team_id} vs {away_team_id}).")
-            return []
+            return existing_h2h_matches  # 🔹 Ha nincs API adat, visszaadjuk az adatbázis tartalmát
 
-        h2h_stats = [
-            {
-                "id": fixture['fixture']['id'],
+        new_h2h_stats = []
+        for fixture in data['response']:
+            match_id = fixture['fixture']['id']
+
+            # 🔹 Ellenőrizzük, hogy a mérkőzés már létezik-e az adatbázisban
+            if check_h2h_match_exists(match_id):
+                continue  # Ha már létezik, nem mentjük újra
+
+            new_h2h_stats.append({
+                "id": match_id,
                 "date": fixture['fixture']['date'],
                 "home_team_id": fixture['teams']['home']['id'],
                 "home_team_name": fixture['teams']['home']['name'],
@@ -589,22 +612,22 @@ def get_head_to_head_stats(home_team_id, away_team_id):
                 "away_team_name": fixture['teams']['away']['name'],
                 "away_team_country": fixture['league'].get('country', 'Unknown'),
                 "away_team_logo": fixture['teams']['away']['logo'],
-                "score_home": fixture['score']['fulltime'].get('home', 0),
-                "score_away": fixture['score']['fulltime'].get('away', 0),
+                "score_home": fixture.get('score', {}).get('fulltime', {}).get('home', 0),
+                "score_away": fixture.get('score', {}).get('fulltime', {}).get('away', 0),
                 "status": fixture['fixture']['status']['short']
-            }
-            for fixture in data['response']
-        ]
+            })
 
-        # Az adatok mentése az adatbázisba a write_to_fixtures függvénnyel
-        write_to_fixtures(h2h_stats)
-        print(f"✅ {len(h2h_stats)} H2H mérkőzés sikeresen elmentve ({home_team_id} vs {away_team_id}).")
+        # 🔹 Ha van új mérkőzés, elmentjük
+        if new_h2h_stats:
+            write_to_fixtures(new_h2h_stats)
+            print(f"✅ {len(new_h2h_stats)} új H2H mérkőzés sikeresen elmentve ({home_team_id} vs {away_team_id}).")
 
-        return h2h_stats
+        # 🔹 Az új + meglévő H2H meccseket visszaadjuk
+        return existing_h2h_matches + new_h2h_stats
 
     except requests.exceptions.RequestException as e:
         print(f"❌ API hiba történt H2H statisztikák lekérésekor: {e}")
-        return []
+        return existing_h2h_matches  # 🔹 Ha API hiba van, visszaadjuk az adatbázisban lévő adatokat
 
 
 def get_team_statistics(league_id, season, team_id, date=None):

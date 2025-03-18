@@ -1,34 +1,29 @@
-from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
-from src.Backend.helpersAPI import load_simulations_from_db, fetch_fixtures_for_simulation
-
-# Szimulációs és mérkőzésadatok (valós esetben adatbázisból)
-simulations_data = [
-    (1, "FirstList", "2025-03-10"),
-    (2, "SecondList", "2025-03-11"),
-]
-
-fixtures_by_simulation = {
-    1: [
-        (101, "Team A", "Team B", "2025-03-12 18:00:00"),
-        (102, "Team C", "Team D", "2025-03-12 20:00:00"),
-    ],
-    2: [
-        (103, "Team E", "Team F", "2025-03-13 18:00:00"),
-        (104, "Team G", "Team H", "2025-03-13 20:00:00"),
-    ],
-}
+from src.Backend.helpersAPI import (
+    load_simulations_from_db,
+    fetch_fixtures_for_simulation,
+    get_predictions_for_fixture,
+)
+from src.Backend.strategies import (
+    flat_betting,
+    value_betting,
+    martingale,
+    fibonacci,
+    kelly_criterion,
+)
 
 
 class SimulationsWindow(tk.Toplevel):
     def __init__(self, master, refresh_callback=None):
         super().__init__(master)
-        self.refresh_callback = refresh_callback  # A főmenü frissítéséhez
+        self.refresh_callback = refresh_callback
         self.title("Szimulációk és mérkőzések")
-        self.geometry("700x500")
-        self.minsize(700, 500)
+        self.geometry("1000x500")
+        self.minsize(1000, 500)
 
         # Szimulációk táblázata
         self.simulation_label = ttk.Label(self, text="Elérhető szimulációk", font=("Arial", 12, "bold"))
@@ -49,41 +44,46 @@ class SimulationsWindow(tk.Toplevel):
 
         self.load_simulations()
 
-        # Kiválasztott mérkőzések listája
+        # Mérkőzések táblázata
         self.fixture_label = ttk.Label(self, text="Szimulációhoz tartozó mérkőzések", font=("Arial", 12, "bold"))
         self.fixture_label.pack(pady=5)
 
-        self.fixture_treeview = ttk.Treeview(self, columns=("fixture_id", "home_team", "away_team", "match_date"),
-                                             show="headings")
+        self.fixture_treeview = ttk.Treeview(self, columns=(
+            "fixture_id", "home_team", "away_team", "match_date",
+            "bayes_classic", "monte_carlo", "poisson",
+            "bayes_empirical", "log_reg", "elo"
+        ), show="headings")
+
         self.fixture_treeview.heading("fixture_id", text="Mérkőzés ID", anchor="center")
         self.fixture_treeview.heading("home_team", text="Hazai csapat")
         self.fixture_treeview.heading("away_team", text="Vendég csapat")
         self.fixture_treeview.heading("match_date", text="Dátum")
 
-        self.fixture_treeview.column("fixture_id", width=100, anchor="center")
-        self.fixture_treeview.column("home_team", width=150)
-        self.fixture_treeview.column("away_team", width=150)
-        self.fixture_treeview.column("match_date", width=150)
+        self.fixture_treeview.heading("bayes_classic", text="Bayes Classic")
+        self.fixture_treeview.heading("monte_carlo", text="Monte Carlo")
+        self.fixture_treeview.heading("poisson", text="Poisson")
+        self.fixture_treeview.heading("bayes_empirical", text="Bayes Empirical")
+        self.fixture_treeview.heading("log_reg", text="Logistic Reg.")
+        self.fixture_treeview.heading("elo", text="Elo")
 
         self.fixture_treeview.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Gombok hozzáadása
         self.add_widgets()
 
     def add_widgets(self):
-        """Gombok és input mező hozzáadása."""
         button_frame = tk.Frame(self)
         button_frame.pack(pady=5)
 
-        self.delete_simulation_button = ttk.Button(button_frame, text="Szimuláció törlése", command=self.delete_selected_simulation)
+        self.delete_simulation_button = ttk.Button(
+            button_frame, text="Szimuláció törlése", command=self.delete_selected_simulation
+        )
         self.delete_simulation_button.pack(side="left", padx=5)
 
         self.close_button = ttk.Button(button_frame, text="Bezárás", command=self.destroy)
         self.close_button.pack(side="left", padx=5)
 
     def load_simulations(self):
-        """Betölti az adatbázisból az elérhető szimulációkat a táblázatba."""
-        self.simulation_treeview.delete(*self.simulation_treeview.get_children())  # Előző adatok törlése
+        self.simulation_treeview.delete(*self.simulation_treeview.get_children())
 
         simulations = load_simulations_from_db()
         for simulation in simulations:
@@ -91,53 +91,131 @@ class SimulationsWindow(tk.Toplevel):
                                             values=(simulation["id"], simulation["name"], simulation["created_at"]))
 
     def on_simulation_select(self, event):
-        """Ha egy szimulációra kattintunk, megjeleníti a hozzá tartozó mérkőzéseket."""
         selected_item = self.simulation_treeview.selection()
         if not selected_item:
             return
 
         sim_id = int(self.simulation_treeview.item(selected_item[0], "values")[0])
+
         fixtures = fetch_fixtures_for_simulation(sim_id)
+        predictions_by_fixture = []
 
-        # Töröljük az előző mérkőzéseket
-        for item in self.fixture_treeview.get_children():
-            self.fixture_treeview.delete(item)
+        self.fixture_treeview.delete(*self.fixture_treeview.get_children())
 
-        # Betöltjük az új mérkőzéseket
         for fixture in fixtures:
+            fixture_id = fixture["fixture_id"]
+            predictions = get_predictions_for_fixture(fixture_id)
+            predictions_by_fixture.append({"fixture": fixture, "predictions": predictions})
+
             self.fixture_treeview.insert("", "end", values=(
-                fixture["fixture_id"], fixture["home_team"], fixture["away_team"], fixture["match_date"]
+                fixture_id,
+                fixture["home_team"],
+                fixture["away_team"],
+                fixture["match_date"],
+                predictions["bayes_classic"],
+                predictions["monte_carlo"],
+                predictions["poisson"],
+                predictions["bayes_empirical"],
+                predictions["log_reg"],
+                predictions["elo"]
             ))
 
-    def load_fixtures_for_simulation(self, simulation_id):
-        """Betölti a kiválasztott szimulációhoz tartozó mérkőzéseket."""
-        for item in self.fixture_treeview.get_children():
-            self.fixture_treeview.delete(item)
-
-        if simulation_id in fixtures_by_simulation:
-            for fixture in fixtures_by_simulation[simulation_id]:
-                self.fixture_treeview.insert("", "end", values=fixture)
+        VisualizationWindow(self, predictions_by_fixture)
 
     def delete_selected_simulation(self):
-        """Törli a kiválasztott szimulációt és annak mérkőzéseit."""
         selected_item = self.simulation_treeview.selection()
         if not selected_item:
             messagebox.showwarning("Figyelmeztetés", "Nem választottál ki törlendő szimulációt.")
             return
 
         sim_id = int(self.simulation_treeview.item(selected_item[0], "values")[0])
-
-        # Törlés a listából (valós esetben adatbázisból is)
-        global simulations_data, fixtures_by_simulation
-        simulations_data = [s for s in simulations_data if s[0] != sim_id]
-        if sim_id in fixtures_by_simulation:
-            del fixtures_by_simulation[sim_id]
+        # Adatbázisból törlő függvényt itt hívd meg!
 
         self.load_simulations()
-        self.fixture_treeview.delete(*self.fixture_treeview.get_children())  # Törli a mérkőzéseket is
-
+        self.fixture_treeview.delete(*self.fixture_treeview.get_children())
         messagebox.showinfo("Siker", f"Szimuláció ID: {sim_id} törölve.")
 
-        # Hívjuk meg a callback függvényt a főmenü frissítésére, ha van
         if self.refresh_callback:
             self.refresh_callback()
+
+
+class VisualizationWindow(tk.Toplevel):
+    def __init__(self, master, predictions_by_fixture):
+        super().__init__(master)
+        self.predictions_by_fixture = predictions_by_fixture
+        self.title("Fogadási stratégiák grafikonja")
+        self.geometry("1000x600")
+
+        ttk.Label(self, text="Kezdő tét:", font=("Arial", 10)).pack(pady=5)
+        self.stake_entry = ttk.Entry(self)
+        self.stake_entry.insert(0, "10")
+        self.stake_entry.pack(pady=5)
+
+        button_frame = ttk.Frame(self)
+        button_frame.pack(pady=10)
+
+        strategies = ["Flat Betting", "Value Betting", "Martingale", "Fibonacci", "Kelly Criterion"]
+
+        for strategy in strategies:
+            ttk.Button(button_frame, text=strategy, command=lambda s=strategy: self.plot_strategy(s)).pack(side="left", padx=5)
+
+        self.figure = Figure(figsize=(9, 5), dpi=100)
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self)
+        self.canvas.get_tk_widget().pack(fill='both', expand=True)
+
+    def plot_strategy(self, strategy_name):
+        stake = float(self.stake_entry.get())
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+
+        total_stake = 0
+        final_balance = 1000  # Kezdő bankroll
+        has_data = False  # Új változó, hogy ellenőrizzük, van-e kiábrázolható adat
+
+        for model_name in ["bayes_classic", "monte_carlo", "poisson", "bayes_empirical", "log_reg", "elo"]:
+            bets = []
+            for fixture in self.predictions_by_fixture:
+                pred = fixture["predictions"].get(model_name)
+
+                if pred and "odds_list" in pred and len(pred["odds_list"]) > 0:
+                    avg_odds = sum(pred["odds_list"]) / len(pred["odds_list"])  # Átlag odds
+                    bet_data = {
+                        "won": pred.get("outcome") == "Home",
+                        "odds": avg_odds,
+                        "model_probability": pred.get("model_probability", 0.5),
+                    }
+                    bets.append(bet_data)
+
+            if not bets:
+                continue  # Ha nincs adat, kihagyjuk ezt a modellt
+
+            if strategy_name == "Flat Betting":
+                bankroll = flat_betting(bets, stake)
+            elif strategy_name == "Value Betting":
+                bankroll = value_betting(bets, stake)
+            elif strategy_name == "Martingale":
+                bankroll = martingale(bets, stake)
+            elif strategy_name == "Fibonacci":
+                bankroll = fibonacci(bets, stake)
+            elif strategy_name == "Kelly Criterion":
+                bankroll = kelly_criterion(bets)
+
+            if bankroll:  # Ha van kirajzolható adat
+                ax.plot(bankroll, label=f"{model_name} (Avg. odds)")
+                has_data = True  # Megjegyezzük, hogy volt legalább egy érvényes vonal
+
+            total_stake += len(bets) * stake
+            final_balance = bankroll[-1] if bankroll else final_balance
+
+        profit = final_balance - 1000
+
+        ax.set_title(f"Bankroll változása - {strategy_name}\nFelhasznált összeg: {total_stake} | Profit: {profit:.2f}")
+        ax.set_xlabel("Mérkőzés sorszáma")
+        ax.set_ylabel("Bankroll értéke")
+
+        if has_data:
+            ax.legend()  # Csak akkor hívjuk meg, ha valóban van kirajzolható vonal
+
+        self.canvas.draw()
+
+

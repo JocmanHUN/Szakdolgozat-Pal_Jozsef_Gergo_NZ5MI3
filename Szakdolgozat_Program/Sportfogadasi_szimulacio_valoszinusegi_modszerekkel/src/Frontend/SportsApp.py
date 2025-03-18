@@ -1,11 +1,14 @@
 import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, messagebox
+
+from src.Backend.helpersModel import save_all_predictions
+from src.Backend.helpersSim import get_all_strategies, create_simulation
 from src.Frontend.PastResultsApp import PastResultsApp
 from src.Frontend.SimulationsWindow import SimulationsWindow
 from src.Frontend.TeamsApp import TeamsApp
 from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id, update_fixtures_status, \
-    check_simulation_exists, save_match_group, save_match_to_group, get_team_id_by_name
+    check_group_name_exists, save_match_group, save_match_to_group, get_team_id_by_name, save_model_prediction
 from src.Backend.api_requests import save_pre_match_fixtures, save_odds_for_fixture, fetch_odds_for_fixture, \
     sync_bookmakers, ensure_simulation_data_available
 
@@ -497,8 +500,8 @@ class SelectedFixturesWindow(tk.Toplevel):
             return
 
         # Ellenőrizzük, hogy létezik-e már ilyen nevű szimuláció
-        if check_simulation_exists(match_group_name):
-            messagebox.showerror("Hiba", f"Már létezik egy szimuláció ezzel a névvel: '{match_group_name}'!")
+        if check_group_name_exists(match_group_name):
+            messagebox.showerror("Hiba", f"Már létezik egy mérkőzéscsoport ezzel a névvel: '{match_group_name}'!")
             return
 
         # 🔍 **Csapatnevekből ID-ket keresünk**
@@ -528,11 +531,34 @@ class SelectedFixturesWindow(tk.Toplevel):
 
         # 🚀 **Biztosítjuk az adatok elérhetőségét a szimulációhoz**
         print(f"🔄 Adatok biztosítása a szimulációhoz: {match_group_name}")
-        ensure_simulation_data_available(fixture_list)  # Premier League ID és szezon megadása
+        ensure_simulation_data_available(fixture_list)
 
-        self.save_simulation_to_database(match_group_name, selected_fixtures)
+        match_group_id = self.save_simulation_to_database(match_group_name, selected_fixtures)
+
+        if match_group_id is None:
+            print("❌ Hiba: A mérkőzéscsoport ID nem található.")
+            messagebox.showerror("Hiba", "Nem sikerült elmenteni a mérkőzéscsoportot!")
+            return
+
+        # 🔹 **Modellek predikcióinak mentése**
+        for fixture in selected_fixtures:
+            fixture_id = fixture[0]
+            home_team_id = get_team_id_by_name(fixture[1])
+            away_team_id = get_team_id_by_name(fixture[2])
+
+            save_all_predictions(fixture_id, home_team_id, away_team_id, match_group_id)
+
+            # Összes stratégia lekérése
+        strategies = get_all_strategies()
+
+        # Minden stratégiához létrehozzuk a simulations rekordokat
+        for strategy in strategies:
+            create_simulation(match_group_id, strategy['id'])
+
+        messagebox.showinfo("Siker", "Szimulációk és előrejelzések sikeresen mentve.")
+
         selected_fixtures.clear()
-        # Frissítsük a főmenü Treeview stílusát, ha elérhető
+
         if isinstance(self.master.app.current_frame, MainMenu):
             self.master.app.current_frame.update_fixture_styles()
 
@@ -552,6 +578,8 @@ class SelectedFixturesWindow(tk.Toplevel):
 
         messagebox.showinfo("Siker", f"A '{match_group_name}' nevű mérkőzéscsoport sikeresen mentve!")
 
+        return match_group_id  # 🔹 Az ID-t visszaadjuk a hívó függvénynek
+
     def sort_treeview(self, column):
         """Rendezi a Treeview tartalmát az adott oszlop alapján."""
         self.sort_orders[column] = not self.sort_orders[column]  # Fordítsuk meg a rendezési sorrendet
@@ -569,3 +597,22 @@ class SelectedFixturesWindow(tk.Toplevel):
 
         for index, (value, item) in enumerate(data):
             self.treeview.move(item, '', index)
+
+    def load_selected_fixtures(self):
+        """Betölti a kiválasztott mérkőzéseket a táblázatba."""
+        global selected_fixtures
+
+        # Előző sorok törlése
+        for item in self.treeview.get_children():
+            self.treeview.delete(item)
+
+        # Új sorok hozzáadása
+        for fixture in selected_fixtures:
+            self.treeview.insert("", "end", values=fixture)
+
+    def refresh_selected_fixtures(self):
+        """Frissíti a kiválasztott mérkőzések listáját a GUI-ban."""
+        print("🔄 Kiválasztott mérkőzések frissítése...")
+        self.load_selected_fixtures()
+
+

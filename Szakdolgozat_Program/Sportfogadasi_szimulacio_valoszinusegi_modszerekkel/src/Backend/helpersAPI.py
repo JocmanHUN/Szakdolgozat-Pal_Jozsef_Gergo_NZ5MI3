@@ -1,11 +1,10 @@
-from datetime import datetime
-
 import mysql.connector
 import requests
 
 from src.config import DB_CONFIG, BASE_URL, API_KEY, HOST
 from dateutil import parser
 import pytz
+
 def get_db_connection():
     """Establishes the database connection."""
     try:
@@ -388,7 +387,7 @@ def get_team_id_by_name(team_name):
 
     cursor = connection.cursor()
     try:
-        query = "SELECT id FROM teams WHERE name = %s"
+        query = "SELECT id FROM teams WHERE name = %s LIMIT 1"
         cursor.execute(query, (team_name,))
         result = cursor.fetchone()
 
@@ -531,14 +530,16 @@ def get_pre_match_fixtures():
     try:
         query = """
             SELECT 
-                fixtures.id AS fixture_id,
-                fixtures.date AS match_date,
-                home_team.name AS home_team,
-                away_team.name AS away_team
+            fixtures.id AS fixture_id,
+            fixtures.date AS match_date,
+            home_team.name AS home_team,
+            away_team.name AS away_team
             FROM fixtures
             LEFT JOIN teams AS home_team ON fixtures.home_team_id = home_team.id
             LEFT JOIN teams AS away_team ON fixtures.away_team_id = away_team.id
-            WHERE fixtures.status = 'NS'
+            WHERE fixtures.status = 'NS' 
+            AND fixtures.date >= NOW()
+            ORDER BY fixtures.date ASC;
         """
         cursor.execute(query)
         fixtures = cursor.fetchall()
@@ -658,6 +659,7 @@ def update_fixtures_status():
             cursor.executemany(update_query, updates)
             connection.commit()
             print(f"{len(updates)} mérkőzés frissítve.")
+            print(updates)
 
         else:
             print("Nincs változás az adatbázisban.")
@@ -726,7 +728,7 @@ def odds_already_saved(fixture_id):
         cursor.close()
         connection.close()
 
-def check_simulation_exists(simulation_name):
+def check_group_name_exists(simulation_name):
     """
     Ellenőrzi, hogy létezik-e már egy adott nevű szimuláció a match_groups táblában.
 
@@ -854,14 +856,15 @@ def fetch_fixtures_for_simulation(simulation_id):
         cursor.close()
         connection.close()
 
-def get_last_10_matches(team_id):
+def get_last_matches(team_id, opponent_id=None, num_matches=10):
     """
-    Lekéri egy csapat utolsó 10 mérkőzését az adatbázisból.
+    Lekéri egy csapat utolsó X mérkőzését az adatbázisból, kizárva azokat, ahol az ellenfél az opponent_id.
 
     :param team_id: A csapat azonosítója.
-    :return: Lista a csapat legutóbbi 10 mérkőzéséről.
+    :param opponent_id: Ha meg van adva, kizárja az ellene játszott mérkőzéseket.
+    :param num_matches: Hány mérkőzést kérjünk le (alapértelmezett: 10).
+    :return: Lista a csapat legutóbbi X mérkőzéséről.
     """
-
     connection = get_db_connection()
     if connection is None:
         print("❌ Nem sikerült csatlakozni az adatbázishoz.")
@@ -878,12 +881,20 @@ def get_last_10_matches(team_id):
                 FROM fixtures f
                 JOIN teams ht ON f.home_team_id = ht.id
                 JOIN teams at ON f.away_team_id = at.id
-                WHERE (f.home_team_id = %s OR f.away_team_id = %s) 
+                WHERE (f.home_team_id = %s OR f.away_team_id = %s)
                 AND f.date < NOW()
-                ORDER BY f.date DESC
-                LIMIT 10
-            """
-        cursor.execute(query, (team_id, team_id))
+        """
+
+        # Ha van megadott ellenfél (opponent_id), kizárjuk azokat a mérkőzéseket
+        params = [team_id, team_id]
+        if opponent_id:
+            query += " AND NOT (f.home_team_id = %s AND f.away_team_id = %s) AND NOT (f.home_team_id = %s AND f.away_team_id = %s)"
+            params.extend([opponent_id, team_id, team_id, opponent_id])
+
+        query += " ORDER BY f.date DESC LIMIT %s"
+        params.append(num_matches)
+
+        cursor.execute(query, tuple(params))
         matches = cursor.fetchall()
 
         if not matches:
@@ -900,6 +911,7 @@ def get_last_10_matches(team_id):
     finally:
         cursor.close()
         connection.close()
+
 
 
 def read_head_to_head_stats(home_team_id, away_team_id):
@@ -948,3 +960,149 @@ def read_head_to_head_stats(home_team_id, away_team_id):
     finally:
         cursor.close()
         connection.close()
+
+def check_h2h_match_exists(match_id):
+    """
+    Ellenőrzi, hogy egy adott H2H mérkőzés már létezik-e az adatbázisban és befejeződött-e.
+    :param match_id: A mérkőzés egyedi azonosítója (API-ból kapott ID).
+    :return: True, ha már létezik és nem pre-match, False, ha nem.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return False
+
+    cursor = connection.cursor()
+    query = """
+        SELECT id FROM fixtures 
+        WHERE id = %s AND status NOT IN ('NS', 'TBD', 'POSTP')
+    """
+    cursor.execute(query, (match_id,))
+    result = cursor.fetchone()
+    cursor.close()
+    connection.close()
+
+    return result is not None
+
+def get_existing_h2h_matches(home_team_id, away_team_id):
+    """
+    Lekérdezi az adatbázisból a már létező H2H mérkőzéseket, kizárva a pre-match státuszúakat.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+    query = """
+    SELECT * FROM fixtures 
+    WHERE 
+    ((home_team_id = %s AND away_team_id = %s) 
+    OR (home_team_id = %s AND away_team_id = %s))
+    AND status NOT IN ('NS', 'TBD', 'POSTP')
+    ORDER BY date DESC
+    LIMIT 5;
+    """
+    cursor.execute(query, (home_team_id, away_team_id, away_team_id, home_team_id))
+    matches = cursor.fetchall()
+    cursor.close()
+    connection.close()
+
+    return matches
+
+def save_model_prediction(fixture_id, model_id, predicted_outcome, probability, match_group_id):
+    """
+    Elmenti a modellek predikcióit az adatbázisba.
+    """
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        query = """
+            INSERT INTO model_predictions (fixture_id, model_id, predicted_outcome, probability, match_group_id)
+            VALUES (%s, %s, %s, %s, %s);
+        """
+        cursor.execute(query, (fixture_id, model_id, predicted_outcome, probability, match_group_id))
+        connection.commit()
+
+        print(
+            f"✅ Predikció mentve: Fixture ID: {fixture_id}, Model ID: {model_id}, Outcome: {predicted_outcome}, Probability: {probability}%")
+
+    except Exception as e:
+        print(f"❌ Hiba történt a predikció mentése közben: {e}")
+
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def get_league_by_team(team_id):
+    """
+    Lekéri az adott csapat aktuális ligáját az adatbázisból.
+    Az utolsó bejegyzett mérkőzés alapján határozza meg a ligát.
+    """
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        query = """
+            SELECT league_id 
+            FROM teams 
+            WHERE id = %s
+        """
+        cursor.execute(query, (team_id,))  # 🔹 Itt csak egy paraméter kell, ezért a vesszőt meg kell tartani!
+
+        result = cursor.fetchone()
+        print(f"Ita: {result}")
+        if result:
+            return result["league_id"]
+        else:
+            print(f"⚠️ Nincs találat az adatbázisban erre a team_id-re: {team_id}")
+            return None
+
+    except Exception as e:
+        print(f"❌ Hiba történt a liga lekérdezésekor csapat alapján: {e}")
+        return None
+
+    finally:
+        cursor.close()
+        connection.close()
+
+def get_predictions_for_fixture(fixture_id):
+    """
+    Lekérdezi egy adott mérkőzéshez tartozó modellek előrejelzéseit az adatbázisból.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return {}
+
+    cursor = connection.cursor(dictionary=True)
+
+    query = """
+    SELECT model_id, predicted_outcome, probability
+    FROM model_predictions
+    WHERE fixture_id = %s
+    """
+
+    cursor.execute(query, (fixture_id,))
+    predictions = cursor.fetchall()
+    cursor.close()
+    connection.close()
+
+    # Modell ID-k leképezése a megfelelő nevekre
+    model_map = {
+        1: "bayes_classic",
+        2: "monte_carlo",
+        3: "poisson",
+        4: "bayes_empirical",
+        5: "log_reg",
+        6: "elo"
+    }
+
+    model_predictions = {name: "-" for name in model_map.values()}  # Alapértelmezett érték '-'
+
+    for pred in predictions:
+        model_name = model_map.get(pred["model_id"])
+        if model_name:
+            model_predictions[model_name] = f"{pred['predicted_outcome']} ({pred['probability']}%)"
+
+    return model_predictions
+
