@@ -1,13 +1,13 @@
 import numpy as np
 import scipy.stats as stats
-from src.Backend.helpersAPI import get_last_10_matches
+from src.Backend.helpersAPI import get_last_matches
 
 
 def calculate_goal_expectancy(team_id):
     """
     Kiszámítja a hazai és vendégcsapat várható gólmennyiségét az utolsó 10 mérkőzés alapján.
     """
-    matches = get_last_10_matches(team_id)
+    matches = get_last_matches(team_id)
     if not matches:
         return None, None
 
@@ -28,7 +28,7 @@ def poisson_probability(expected_goals, actual_goals):
     return stats.poisson.pmf(actual_goals, expected_goals)
 
 
-def poisson_outcome_probabilities(home_team_id, away_team_id):
+def poisson_predict(home_team_id, away_team_id):
     """
     A Poisson-eloszlás segítségével kiszámítja a mérkőzés 1X2 valószínűségeit, százalékban kifejezve.
     """
@@ -55,8 +55,9 @@ def poisson_outcome_probabilities(home_team_id, away_team_id):
     away_win_prob = np.sum(np.triu(result_matrix, 1)) * 100  # Vendég győzelem
 
     return {
-        "home_win": round(home_win_prob, 2),  # Két tizedesjegyre kerekítve
-        "draw": round(draw_prob, 2),
-        "away_win": round(away_win_prob, 2)
+        "1": float(round(home_win_prob, 2)),
+        "X": float(round(draw_prob, 2)),
+        "2": float(round(away_win_prob, 2))
     }
+
 
