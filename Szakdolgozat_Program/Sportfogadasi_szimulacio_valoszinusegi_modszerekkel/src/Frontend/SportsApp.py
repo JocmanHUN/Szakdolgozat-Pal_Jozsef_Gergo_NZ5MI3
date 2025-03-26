@@ -2,15 +2,16 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, messagebox
 
-from src.Backend.helpersModel import save_all_predictions
+from src.Backend.helpersModel import save_all_predictions, ensure_simulation_data_available
 from src.Backend.helpersSim import get_all_strategies, create_simulation
 from src.Frontend.PastResultsApp import PastResultsApp
 from src.Frontend.SimulationsWindow import SimulationsWindow
 from src.Frontend.TeamsApp import TeamsApp
-from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id, update_fixtures_status, \
-    check_group_name_exists, save_match_group, save_match_to_group, get_team_id_by_name, save_model_prediction
-from src.Backend.api_requests import save_pre_match_fixtures, save_odds_for_fixture, fetch_odds_for_fixture, \
-    sync_bookmakers, ensure_simulation_data_available
+from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id,\
+    check_group_name_exists, save_match_group, save_match_to_group, get_team_id_by_name
+
+from src.Backend.api_requests import save_odds_for_fixture, fetch_odds_for_fixture, \
+    sync_bookmakers
 
 # Globális lista a kiválasztott mérkőzésekhez
 selected_fixtures = []
@@ -532,9 +533,7 @@ class SelectedFixturesWindow(tk.Toplevel):
         # 🚀 **Biztosítjuk az adatok elérhetőségét a szimulációhoz**
         print(f"🔄 Adatok biztosítása a szimulációhoz: {match_group_name}")
         ensure_simulation_data_available(fixture_list)
-
-        match_group_id = self.save_simulation_to_database(match_group_name, selected_fixtures)
-
+        match_group_id = self.save_simulation_fixtures_to_database(match_group_name, selected_fixtures)
         if match_group_id is None:
             print("❌ Hiba: A mérkőzéscsoport ID nem található.")
             messagebox.showerror("Hiba", "Nem sikerült elmenteni a mérkőzéscsoportot!")
@@ -564,7 +563,7 @@ class SelectedFixturesWindow(tk.Toplevel):
 
         self.destroy()
 
-    def save_simulation_to_database(self, match_group_name, fixtures):
+    def save_simulation_fixtures_to_database(self, match_group_name, fixtures):
         """
         A felhasználói interfész meghívja ezt a függvényt, amikor a szimulációt menteni kell.
         """
@@ -614,5 +613,8 @@ class SelectedFixturesWindow(tk.Toplevel):
         """Frissíti a kiválasztott mérkőzések listáját a GUI-ban."""
         print("🔄 Kiválasztott mérkőzések frissítése...")
         self.load_selected_fixtures()
+
+
+
 
 
