@@ -71,7 +71,7 @@ def write_to_teams(data, league_id):
         cursor.close()
         connection.close()
 
-def read_from_teams(league_id, season):
+def read_from_teams(league_id):
     connection = get_db_connection()
     if connection is None:
         return []
@@ -614,7 +614,7 @@ def update_fixtures_status():
             response = requests.get(url, headers=headers, params=params)
             response.raise_for_status()
             api_data = response.json().get("response", [])
-
+            print(api_data)
             if not api_data:
                 continue  # Ha az API nem adott vissza adatot, lépjünk tovább
 
@@ -830,13 +830,16 @@ def load_simulations_from_db():
         connection.close()
 
 def fetch_fixtures_for_simulation(simulation_id):
-    """Lekéri az adott szimulációhoz tartozó mérkőzéseket az adatbázisból."""
+    """Lekéri az adott szimulációhoz tartozó mérkőzéseket, beleértve az aktuális állapotot és végeredményt is."""
     connection = get_db_connection()
     cursor = connection.cursor(dictionary=True)
 
     try:
         query = """
             SELECT f.id AS fixture_id, 
+                   f.status,  -- Mérkőzés státusza (NS, FT, stb.)
+                   f.score_home,  -- Hazai csapat pontszáma
+                   f.score_away,  -- Vendég csapat pontszáma
                    t1.name AS home_team, 
                    t2.name AS away_team, 
                    f.date AS match_date
@@ -847,14 +850,19 @@ def fetch_fixtures_for_simulation(simulation_id):
             WHERE mgf.match_group_id = %s
         """
         cursor.execute(query, (simulation_id,))
-        return cursor.fetchall()
+        results = cursor.fetchall()  # Több mérkőzés lehet egy szimulációhoz
+
+        print("🔍 DEBUG: Lekért mérkőzések adatai:", results)  # Debug célokra
+
+        return results
 
     except mysql.connector.Error as err:
-        print(f"Adatbázis hiba mérkőzések lekérdezésekor: {err}")
+        print(f"❌ Adatbázis hiba mérkőzések lekérdezésekor: {err}")
         return []
     finally:
         cursor.close()
         connection.close()
+
 
 def get_last_matches(team_id, opponent_id=None, num_matches=10):
     """
@@ -1049,7 +1057,7 @@ def get_league_by_team(team_id):
             WHERE id = %s
         """
         cursor.execute(query, (team_id,))  # 🔹 Itt csak egy paraméter kell, ezért a vesszőt meg kell tartani!
-
+        print(team_id)
         result = cursor.fetchone()
         print(f"Ita: {result}")
         if result:
@@ -1105,4 +1113,92 @@ def get_predictions_for_fixture(fixture_id):
             model_predictions[model_name] = f"{pred['predicted_outcome']} ({pred['probability']}%)"
 
     return model_predictions
+
+
+def get_best_odds_for_fixture(fixture_id, predicted_outcome):
+    """
+    Lekérdezi az adott mérkőzéshez tartozó legjobb oddsot és a megfelelő fogadóirodát.
+
+    :param fixture_id: A mérkőzés azonosítója.
+    :param predicted_outcome: A modell által előrejelzett eredmény ("Home", "Draw" vagy "Away").
+    :return: (legjobb_odds, bookmaker_id) ha találunk, különben (None, None)
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return None, None
+
+    cursor = connection.cursor(dictionary=True)
+
+    # Kiválasztjuk a megfelelő oszlopot az eredmény alapján
+    column_name = {
+        "1": "home_odds",
+        "X": "draw_odds",
+        "2": "away_odds"
+    }.get(predicted_outcome, None)
+    print(column_name,predicted_outcome)
+    if column_name is None:
+        return None, None  # Ha a modell érvénytelen eredményt adott vissza
+
+    query = f"""
+        SELECT bookmaker_id, {column_name} AS selected_odds
+        FROM odds
+        WHERE fixture_id = %s
+        ORDER BY selected_odds DESC
+        LIMIT 1
+    """
+
+    try:
+        print("Folytatódik")
+        cursor.execute(query, (fixture_id,))
+        result = cursor.fetchone()
+        print(f"Ita: {result}")
+        if result:
+            print(result)
+            return result
+        return None, None
+
+    except Exception as e:
+        print(f"❌ Hiba az odds lekérdezésekor: {e}")
+        return None, None
+
+    finally:
+        cursor.close()
+        connection.close()
+
+def write_league_id_to_team(team_id, league_id):
+    """
+    Frissíti a megadott csapat league_id értékét az adatbázisban.
+
+    :param team_id: A frissítendő csapat azonosítója.
+    :param league_id: A liga azonosító, amit be kell állítani.
+    """
+    connection = None
+    cursor = None
+
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        update_query = """
+            UPDATE teams
+            SET league_id = %s
+            WHERE id = %s
+        """
+
+        cursor.execute(update_query, (league_id, team_id))
+        connection.commit()
+
+        if cursor.rowcount > 0:
+            print(f"✅ Liga azonosító sikeresen frissítve: team_id={team_id}, league_id={league_id}")
+        else:
+            print(f"⚠️ Nem található csapat ezzel a team_id-vel: {team_id}")
+
+    except Exception as e:
+        print(f"❌ Hiba történt a liga frissítésekor az adatbázisban: {e}")
+
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
 
