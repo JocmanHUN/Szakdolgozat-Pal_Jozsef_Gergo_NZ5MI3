@@ -494,68 +494,70 @@ class SelectedFixturesWindow(tk.Toplevel):
             messagebox.showwarning("Figyelmeztetés", "Adj meg egy nevet a mérkőzéscsoportnak!")
             return
 
-        num_fixtures = len(selected_fixtures)
-
-        if num_fixtures > 25:
+        if len(selected_fixtures) > 25:
             messagebox.showwarning("Figyelmeztetés", "Legfeljebb 25 mérkőzést választhatsz ki egy szimulációhoz!")
             return
 
-        # Ellenőrizzük, hogy létezik-e már ilyen nevű szimuláció
         if check_group_name_exists(match_group_name):
             messagebox.showerror("Hiba", f"Már létezik egy mérkőzéscsoport ezzel a névvel: '{match_group_name}'!")
             return
 
-        # 🔍 **Csapatnevekből ID-ket keresünk**
+        # 🔍 Nevekből ID-k
         fixture_list = []
-        for fixture in selected_fixtures:
-            fixture_id = fixture[0]  # Mérkőzés azonosítója
-            home_team_name = fixture[1]  # Hazai csapat neve
-            away_team_name = fixture[2]  # Vendég csapat neve
+        id_to_fixture = {}  # hogy később visszatudjuk fordítani a neveket
 
-            # ✅ Nevekből ID-k lekérése
+        for fixture in selected_fixtures:
+            fixture_id = fixture[0]
+            home_team_name = fixture[1]
+            away_team_name = fixture[2]
+
             home_team_id = get_team_id_by_name(home_team_name)
             away_team_id = get_team_id_by_name(away_team_name)
 
             if home_team_id is None or away_team_id is None:
-                print(f"❌ Hiba: Nem található az egyik csapat az adatbázisban: {home_team_name} vs {away_team_name}")
-                messagebox.showerror("Hiba",
-                                     f"Nem található csapat az adatbázisban: {home_team_name} vagy {away_team_name}")
-                continue  # Ha nincs meg az ID, nem tesszük bele a listába
+                print(f"❌ Hiba: Nincs meg a csapat: {home_team_name} vs {away_team_name}")
+                messagebox.showerror("Hiba", f"Nem található csapat: {home_team_name} vagy {away_team_name}")
+                continue
 
             fixture_list.append((home_team_id, away_team_id, fixture_id))
+            id_to_fixture[fixture_id] = (fixture_id, home_team_name, away_team_name)
 
-        # ⚠️ Ha nincs egyetlen érvényes mérkőzés sem, akkor nem hívjuk meg a függvényt
         if not fixture_list:
-            print("⚠️ Nincsenek érvényes mérkőzések az adatbázisban. Ellenőrizd a csapatneveket!")
             messagebox.showwarning("Figyelmeztetés", "Nem található érvényes mérkőzés. Ellenőrizd a csapatneveket!")
             return
 
-        # 🚀 **Biztosítjuk az adatok elérhetőségét a szimulációhoz**
         print(f"🔄 Adatok biztosítása a szimulációhoz: {match_group_name}")
-        ensure_simulation_data_available(fixture_list)
-        match_group_id = self.save_simulation_fixtures_to_database(match_group_name, selected_fixtures)
+        valid_fixture_ids = ensure_simulation_data_available(fixture_list)
+
+        if len(valid_fixture_ids) < 3:
+            print("⛔ Nem elegendő felhasználható mérkőzés (minimum 3 kell).")
+            messagebox.showerror("Hiba", "Legalább 3 valid meccs szükséges a szimulációhoz.")
+            return
+
+        # Csak a valid fixture-eket mentjük el
+        valid_fixtures_with_names = [id_to_fixture[fx_id] for fx_id in valid_fixture_ids]
+        match_group_id = self.save_simulation_fixtures_to_database(match_group_name, valid_fixtures_with_names)
+
         if match_group_id is None:
             print("❌ Hiba: A mérkőzéscsoport ID nem található.")
             messagebox.showerror("Hiba", "Nem sikerült elmenteni a mérkőzéscsoportot!")
             return
 
-        # 🔹 **Modellek predikcióinak mentése**
-        for fixture in selected_fixtures:
-            fixture_id = fixture[0]
-            home_team_id = get_team_id_by_name(fixture[1])
-            away_team_id = get_team_id_by_name(fixture[2])
+        # 🔮 Predikciók mentése
+        for fixture_id in valid_fixture_ids:
+            home_team_name = id_to_fixture[fixture_id][1]
+            away_team_name = id_to_fixture[fixture_id][2]
+            home_team_id = get_team_id_by_name(home_team_name)
+            away_team_id = get_team_id_by_name(away_team_name)
 
             save_all_predictions(fixture_id, home_team_id, away_team_id, match_group_id)
 
-            # Összes stratégia lekérése
+        # 🧠 Stratégia mentések
         strategies = get_all_strategies()
-
-        # Minden stratégiához létrehozzuk a simulations rekordokat
         for strategy in strategies:
             create_simulation(match_group_id, strategy['id'])
 
         messagebox.showinfo("Siker", "Szimulációk és előrejelzések sikeresen mentve.")
-
         selected_fixtures.clear()
 
         if isinstance(self.master.app.current_frame, MainMenu):
