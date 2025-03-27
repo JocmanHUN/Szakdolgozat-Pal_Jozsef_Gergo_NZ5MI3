@@ -108,26 +108,28 @@ def write_to_fixtures(data):
             home_team_id = fixture['home_team_id']
             away_team_id = fixture['away_team_id']
 
-            # Csapatok létezésének ellenőrzése vagy létrehozása
+                # Csapatok létezésének ellenőrzése vagy létrehozása
             get_or_create_team(home_team_id, fixture['home_team_name'], fixture['home_team_country'], fixture['home_team_logo'])
             get_or_create_team(away_team_id, fixture['away_team_name'], fixture['away_team_country'], fixture['away_team_logo'])
 
+            status = fixture['status']['short'] if isinstance(fixture['status'], dict) else fixture['status']
             # Mérkőzés beszúrása
             cursor.execute(query, (
-                fixture['id'],
-                fixture['date'],
-                home_team_id,
-                away_team_id,
-                fixture['score_home'],
-                fixture['score_away'],
-                fixture['status']
-            ))
+                    fixture['id'],
+                    fixture['date'],
+                    home_team_id,
+                    away_team_id,
+                    fixture['score_home'],
+                    fixture['score_away'],
+                    status
+                ))
         connection.commit()
     except mysql.connector.Error as err:
         print(f"Adatbázis írási hiba mérkőzések esetén: {err}")
     finally:
         cursor.close()
         connection.close()
+
 
 def read_from_fixtures(league_id, season, from_date=None, to_date=None):
     connection = get_db_connection()
@@ -253,7 +255,7 @@ def write_to_match_statistics(fixture_id, team_id, statistics):
             data['passes_percentage'] = stat_value
 
     try:
-        # Adatok beszúrása vagy frissítése az adatbázisba
+        #AAdatok beszúrása vagy frissítése az adatbázisba
         cursor.execute(query, (
             fixture_id, team_id,
             data['shots_on_goal'], data['shots_off_goal'], data['total_shots'],
@@ -924,11 +926,8 @@ def get_last_matches(team_id, opponent_id=None, num_matches=10):
 
 def read_head_to_head_stats(home_team_id, away_team_id):
     """
-    Lekérdezi az utolsó 5 egymás elleni mérkőzést a fixtures táblából.
-
-    :param home_team_id: Hazai csapat ID.
-    :param away_team_id: Vendég csapat ID.
-    :return: Lista az utolsó 5 mérkőzésről, ahol a két csapat játszott egymás ellen.
+    Lekérdezi az utolsó 5 egymás elleni mérkőzést a fixtures táblából, kizárólag azokat,
+    amelyekhez van elmentett statisztika. Ha nincs, törli a mérkőzést az adatbázisból.
     """
     connection = get_db_connection()
     if connection is None:
@@ -949,17 +948,25 @@ def read_head_to_head_stats(home_team_id, away_team_id):
                 OR (f.home_team_id = %s AND f.away_team_id = %s))
                 AND f.date < NOW()
             ORDER BY f.date DESC
-            LIMIT 5
         """
         cursor.execute(query, (home_team_id, away_team_id, away_team_id, home_team_id))
-        h2h_matches = cursor.fetchall()
+        matches = cursor.fetchall()
 
-        if not h2h_matches:
-            print(f"⚠️ Nincs elérhető H2H mérkőzés az adatbázisban ({home_team_id} vs {away_team_id}).")
+        valid_matches = []
+        for match in matches:
+            stats = read_from_match_statistics(match["id"])
+            if stats:
+                valid_matches.append(match)
+            else:
+                print(f"❌ Nincs stat az API-ban sem, törlés: {match['id']}")
+                delete_fixture_by_id(match["id"])
+
+        if valid_matches:
+            print(f"📊 Összesen {len(valid_matches)} H2H meccshez van statisztika ({home_team_id} vs {away_team_id}).")
         else:
-            print(f"✅ {len(h2h_matches)} H2H mérkőzés található az adatbázisban ({home_team_id} vs {away_team_id}).")
+            print(f"⚠️ Nincs statisztikával rendelkező H2H meccs az adatbázisban ({home_team_id} vs {away_team_id}).")
 
-        return h2h_matches
+        return valid_matches  # max 5 visszaadva
 
     except mysql.connector.Error as err:
         print(f"❌ Adatbázis hiba H2H statisztikák lekérdezésekor: {err}")
@@ -990,31 +997,6 @@ def check_h2h_match_exists(match_id):
     connection.close()
 
     return result is not None
-
-def get_existing_h2h_matches(home_team_id, away_team_id):
-    """
-    Lekérdezi az adatbázisból a már létező H2H mérkőzéseket, kizárva a pre-match státuszúakat.
-    """
-    connection = get_db_connection()
-    if connection is None:
-        return []
-
-    cursor = connection.cursor(dictionary=True)
-    query = """
-    SELECT * FROM fixtures 
-    WHERE 
-    ((home_team_id = %s AND away_team_id = %s) 
-    OR (home_team_id = %s AND away_team_id = %s))
-    AND status NOT IN ('NS', 'TBD', 'POSTP')
-    ORDER BY date DESC
-    LIMIT 5;
-    """
-    cursor.execute(query, (home_team_id, away_team_id, away_team_id, home_team_id))
-    matches = cursor.fetchall()
-    cursor.close()
-    connection.close()
-
-    return matches
 
 def save_model_prediction(fixture_id, model_id, predicted_outcome, probability, match_group_id):
     """
@@ -1202,3 +1184,34 @@ def write_league_id_to_team(team_id, league_id):
         if connection:
             connection.close()
 
+def delete_fixture_by_id(fixture_id):
+    """
+    Törli az adott ID-jű mérkőzést a 'fixtures' táblából, ha létezik.
+
+    :param fixture_id: A törlendő mérkőzés azonosítója.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz a törléshez.")
+        return
+
+    cursor = connection.cursor()
+
+    try:
+        # Először ellenőrizzük, hogy létezik-e a meccs
+        cursor.execute("SELECT id FROM fixtures WHERE id = %s", (fixture_id,))
+        result = cursor.fetchone()
+
+        if result:
+            cursor.execute("DELETE FROM fixtures WHERE id = %s", (fixture_id,))
+            connection.commit()
+            print(f"🗑️ Mérkőzés törölve az adatbázisból (Fixture ID: {fixture_id})")
+        else:
+            print(f"ℹ️ A mérkőzés nem található az adatbázisban (Fixture ID: {fixture_id})")
+
+    except Exception as e:
+        print(f"❌ Hiba történt a mérkőzés törlése közben: {e}")
+
+    finally:
+        cursor.close()
+        connection.close()
