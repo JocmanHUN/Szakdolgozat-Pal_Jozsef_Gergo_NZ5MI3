@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from src.Backend.api_requests import get_teams, get_team_statistics
+
+from src.Backend.API.teams import get_teams, get_team_statistics
 from src.Backend.helpersAPI import write_to_teams, read_from_teams, read_from_cards, write_to_cards
 from src.Frontend.helpersGUI import save_leagues_if_not_exists
 from PIL import Image, ImageTk
@@ -136,8 +137,8 @@ class TeamsApp(tk.Frame):
             self.stats_frame.destroy()
 
         # Elrejtjük a fő UI elemeket
-        self.left_frame.grid_remove()
-        self.right_frame.grid_remove()
+        self.left_frame.grid()
+        self.right_frame.grid()
 
         # Új statisztikai frame
         self.stats_frame = ttk.Frame(self, padding=10)
@@ -229,8 +230,8 @@ class TeamsApp(tk.Frame):
             self.stats_frame.destroy()
 
         # Újra megjelenítjük az eredeti UI elemeket
-        self.left_frame.pack(side="left", fill="both", padx=10, pady=10, expand=True)
-        self.right_frame.pack(side="right", fill="both", expand=True)
+        self.left_frame.grid(row=0, column=0, sticky="nswe")
+        self.right_frame.grid(row=0, column=1, sticky="nswe")
 
     def show_card_statistics(self, cards_frame, stats, team_id):
         # Hozzunk létre egy Canvas-t a görgetéshez

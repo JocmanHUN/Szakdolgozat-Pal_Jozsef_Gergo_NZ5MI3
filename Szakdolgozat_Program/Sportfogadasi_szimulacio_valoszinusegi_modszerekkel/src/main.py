@@ -1,4 +1,4 @@
-from src.Backend.api_requests import save_pre_match_fixtures
+from src.Backend.API.fixtures import save_pre_match_fixtures
 from src.Backend.helpersAPI import update_fixtures_status
 from src.Frontend.SportsApp import SportsApp
 import tkinter as tk

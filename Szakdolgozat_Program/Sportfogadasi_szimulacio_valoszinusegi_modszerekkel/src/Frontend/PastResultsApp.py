@@ -1,6 +1,7 @@
-from src.Backend.api_requests import get_fixtures, get_match_statistics
 import tkinter as tk
 from tkinter import ttk, messagebox
+
+from src.Backend.API.fixtures import get_fixtures, get_match_statistics
 from src.Backend.helpersAPI import read_from_fixtures, write_to_fixtures, read_from_leagues, read_from_match_statistics, \
     get_team_id_by_name
 from src.Frontend.helpersGUI import save_leagues_if_not_exists

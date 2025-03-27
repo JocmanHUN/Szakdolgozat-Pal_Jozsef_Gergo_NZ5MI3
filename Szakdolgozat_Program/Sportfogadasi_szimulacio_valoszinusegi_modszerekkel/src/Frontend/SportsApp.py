@@ -2,6 +2,8 @@ import tkinter as tk
 from datetime import datetime
 from tkinter import ttk, messagebox
 
+from src.Backend.API.helpersAPI import sync_bookmakers, save_odds_for_fixture
+from src.Backend.API.odds import fetch_odds_for_fixture
 from src.Backend.helpersModel import save_all_predictions, ensure_simulation_data_available
 from src.Backend.helpersSim import get_all_strategies, create_simulation
 from src.Frontend.PastResultsApp import PastResultsApp
@@ -9,10 +11,6 @@ from src.Frontend.SimulationsWindow import SimulationsWindow
 from src.Frontend.TeamsApp import TeamsApp
 from src.Backend.helpersAPI import get_pre_match_fixtures, get_odds_by_fixture_id,\
     check_group_name_exists, save_match_group, save_match_to_group, get_team_id_by_name
-
-from src.Backend.api_requests import save_odds_for_fixture, fetch_odds_for_fixture, \
-    sync_bookmakers
-
 # Globális lista a kiválasztott mérkőzésekhez
 selected_fixtures = []
 selected_window = None  # Egyetlen példányban tartjuk a kiválasztott mérkőzések ablakát

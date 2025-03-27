@@ -1,9 +1,10 @@
 from datetime import datetime
-
 from dateutil import parser
 
-from src.Backend.api_requests import get_league_id_by_fixture, get_match_statistics, get_fixtures_for_team, \
-    get_head_to_head_stats, fetch_odds_for_fixture, get_fixture_by_id, get_team_country_by_id
+from src.Backend.API.fixtures import get_league_id_by_fixture, get_fixtures_for_team, get_match_statistics, \
+    get_head_to_head_stats, get_fixture_by_id
+from src.Backend.API.odds import fetch_odds_for_fixture
+from src.Backend.API.teams import get_team_country_by_id
 from src.Backend.helpersAPI import get_league_by_team, save_model_prediction, write_league_id_to_team, get_last_matches, \
     write_to_match_statistics, write_to_fixtures, read_odds_by_fixture, write_to_odds, read_from_match_statistics, \
     read_head_to_head_stats, delete_fixture_by_id

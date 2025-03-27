@@ -1,5 +1,4 @@
-import math
-from src.Backend.api_requests import get_team_statistics
+from src.Backend.API.teams import get_team_statistics
 
 ELO_START_VALUES = {
     "top_5": 1700,

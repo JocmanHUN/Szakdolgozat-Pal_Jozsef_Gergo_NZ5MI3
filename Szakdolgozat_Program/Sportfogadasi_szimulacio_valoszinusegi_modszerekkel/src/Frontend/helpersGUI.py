@@ -1,5 +1,6 @@
 from tkinter import messagebox
-from src.Backend.api_requests import get_leagues
+
+from src.Backend.API.leagues import get_leagues
 from src.Backend.helpersAPI import read_from_leagues, write_to_leagues
 
 def save_leagues_if_not_exists():
