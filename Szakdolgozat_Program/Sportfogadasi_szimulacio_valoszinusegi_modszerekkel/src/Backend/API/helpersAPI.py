@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 import pytz
 
 from src.Backend.API.odds import fetch_odds_for_fixture
-from src.Backend.helpersAPI import odds_already_saved, save_bookmakers, write_to_odds, read_from_bookmakers
+from src.Backend.DB.bookmakers import save_bookmakers, read_from_bookmakers
+from src.Backend.DB.odds import odds_already_saved, write_to_odds
 
 
 def get_next_days_dates(days=3):

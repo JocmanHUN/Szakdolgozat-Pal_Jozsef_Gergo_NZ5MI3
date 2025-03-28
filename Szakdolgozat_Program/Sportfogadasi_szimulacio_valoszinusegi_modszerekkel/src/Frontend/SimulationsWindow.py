@@ -4,19 +4,15 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
-from src.Backend.helpersAPI import (
-    load_simulations_from_db,
-    fetch_fixtures_for_simulation,
-    get_predictions_for_fixture, update_fixtures_status, get_best_odds_for_fixture,
-)
-from src.Backend.helpersSim import evaluate_predictions, update_simulation_profit
-from src.Backend.strategies import (
-    flat_betting,
-    value_betting,
-    martingale,
-    fibonacci,
-    kelly_criterion,
-)
+from src.Backend.DB.fixtures import update_fixtures_status, fetch_fixtures_for_simulation
+from src.Backend.DB.odds import get_best_odds_for_fixture
+from src.Backend.DB.predictions import evaluate_predictions, update_simulation_profit, get_predictions_for_fixture
+from src.Backend.DB.simulations import load_simulations_from_db
+from src.Backend.strategies.fibonacci import fibonacci
+from src.Backend.strategies.flatBetting import flat_betting
+from src.Backend.strategies.kellyCriterion import kelly_criterion
+from src.Backend.strategies.martingale import martingale
+from src.Backend.strategies.valueBetting import value_betting
 
 
 class SimulationsWindow(tk.Toplevel):

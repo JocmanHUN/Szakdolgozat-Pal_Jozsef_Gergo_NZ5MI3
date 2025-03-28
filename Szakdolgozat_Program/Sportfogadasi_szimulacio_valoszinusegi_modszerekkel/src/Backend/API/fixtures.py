@@ -2,8 +2,9 @@ from src.Backend.API.endpoints import HEAD_TO_HEAD, FIXTURES, FIXTURE_STATISTICS
 from src.Backend.API.helpersAPI import get_next_days_dates
 from src.Backend.API.make_api_request import make_api_request
 from src.Backend.API.odds import fetch_odds_for_fixture
-from src.Backend.helpersAPI import read_from_fixtures, write_to_fixtures, read_from_match_statistics, \
-    write_to_match_statistics, read_head_to_head_stats, check_h2h_match_exists
+from src.Backend.DB.fixtures import read_from_fixtures, write_to_fixtures, read_head_to_head_stats, \
+    check_h2h_match_exists
+from src.Backend.DB.statistics import read_from_match_statistics, write_to_match_statistics
 
 
 def get_league_id_by_fixture(fixture_id):

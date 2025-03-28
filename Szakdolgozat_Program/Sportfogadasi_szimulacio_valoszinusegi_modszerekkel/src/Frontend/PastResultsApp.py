@@ -2,13 +2,14 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from src.Backend.API.fixtures import get_fixtures, get_match_statistics
-from src.Backend.helpersAPI import read_from_fixtures, write_to_fixtures, read_from_leagues, read_from_match_statistics, \
-    get_team_id_by_name
+from src.Backend.DB.fixtures import read_from_fixtures, write_to_fixtures
+from src.Backend.DB.leagues import read_from_leagues
+from src.Backend.DB.statistics import read_from_match_statistics
+from src.Backend.DB.teams import get_team_id_by_name, get_team_name_from_db
 from src.Frontend.helpersGUI import save_leagues_if_not_exists
 from datetime import datetime
 from tkcalendar import DateEntry
 import pytz
-from src.Backend.helpersAPI import get_db_connection
 
 class PastResultsApp(tk.Frame):
     def __init__(self, app):
@@ -129,23 +130,6 @@ class PastResultsApp(tk.Frame):
         # A ligákat betöltjük az adatbázisból
         return read_from_leagues()
 
-    def get_team_name_from_db(self, team_id):
-        """
-        Lekéri a csapat nevét az adatbázisból a megadott csapat ID alapján.
-        """
-        connection = get_db_connection()  # Az adatbázis kapcsolat itt jön létre
-        if connection is None:
-            return 'Unknown'
-
-        cursor = connection.cursor(dictionary=True)
-        query = "SELECT name FROM teams WHERE id = %s"
-        cursor.execute(query, (team_id,))
-        result = cursor.fetchone()
-        cursor.close()
-        connection.close()
-
-        return result['name'] if result else 'Unknown'
-
     def show_fixtures_list(self):
         self.results_tree.delete(*self.results_tree.get_children())  # Előző adatok törlése
 
@@ -166,8 +150,8 @@ class PastResultsApp(tk.Frame):
             formatted_date = match_date.strftime("%Y-%m-%d %H:%M")
 
             # Hazai és vendég csapat nevének lekérése az adatbázisból
-            home_team = self.get_team_name_from_db(fixture['home_team_id'])
-            away_team = self.get_team_name_from_db(fixture['away_team_id'])
+            home_team = get_team_name_from_db(fixture['home_team_id'])
+            away_team = get_team_name_from_db(fixture['away_team_id'])
 
             # Mérkőzés adatok beszúrása a TreeView-be
             self.results_tree.insert("", "end", values=(

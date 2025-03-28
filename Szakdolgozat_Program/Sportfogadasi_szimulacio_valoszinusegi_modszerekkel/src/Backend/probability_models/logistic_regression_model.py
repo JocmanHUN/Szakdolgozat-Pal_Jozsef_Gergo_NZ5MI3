@@ -5,7 +5,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.model_selection import cross_val_score
 
 from src.Backend.API.fixtures import get_match_statistics
-from src.Backend.helpersAPI import get_last_matches
+from src.Backend.DB.fixtures import get_last_matches
 
 
 def extract_features(match_stats):

@@ -1,4 +1,4 @@
-from src.Backend.helpersAPI import get_last_matches
+from src.Backend.DB.fixtures import get_last_matches
 
 
 def calculate_weighted_bayes_probabilities(team_id, num_matches=10, decay_factor=0.9):

@@ -1,32 +1,73 @@
-from src.Backend.helpersAPI import get_db_connection, get_best_odds_for_fixture
+from src.Backend.DB.connection import get_db_connection
+from src.Backend.DB.fixtures import get_fixture_result
+from src.Backend.DB.odds import get_best_odds_for_fixture
 
 
-def create_simulation(match_group_id, strategy_id):
-    connection = get_db_connection()
-    cursor = connection.cursor()
+def save_model_prediction(fixture_id, model_id, predicted_outcome, probability, match_group_id):
+    """
+    Elmenti a modellek predikcióit az adatbázisba.
+    """
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
 
-    cursor.execute("""
-        SELECT id FROM simulations WHERE match_group_id = %s AND strategy_id = %s
-    """, (match_group_id, strategy_id))
-    existing_simulation = cursor.fetchone()
+        query = """
+            INSERT INTO model_predictions (fixture_id, model_id, predicted_outcome, probability, match_group_id)
+            VALUES (%s, %s, %s, %s, %s);
+        """
+        cursor.execute(query, (fixture_id, model_id, predicted_outcome, probability, match_group_id))
+        connection.commit()
 
-    if existing_simulation:
+        print(
+            f"✅ Predikció mentve: Fixture ID: {fixture_id}, Model ID: {model_id}, Outcome: {predicted_outcome}, Probability: {probability}%")
+
+    except Exception as e:
+        print(f"❌ Hiba történt a predikció mentése közben: {e}")
+
+    finally:
         cursor.close()
         connection.close()
-        return existing_simulation[0]
 
-    cursor.execute("""
-        INSERT INTO simulations (match_group_id, strategy_id, total_profit_loss, simulation_date) 
-        VALUES (%s, %s, 0, NOW())
-    """, (match_group_id, strategy_id))
 
-    simulation_id = cursor.lastrowid
-    connection.commit()
+def get_predictions_for_fixture(fixture_id):
+    """
+    Lekérdezi egy adott mérkőzéshez tartozó modellek előrejelzéseit az adatbázisból.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        return {}
+
+    cursor = connection.cursor(dictionary=True)
+
+    query = """
+    SELECT model_id, predicted_outcome, probability
+    FROM model_predictions
+    WHERE fixture_id = %s
+    """
+
+    cursor.execute(query, (fixture_id,))
+    predictions = cursor.fetchall()
     cursor.close()
     connection.close()
 
-    return simulation_id
+    # Modell ID-k leképezése a megfelelő nevekre
+    model_map = {
+        1: "bayes_classic",
+        2: "monte_carlo",
+        3: "poisson",
+        4: "bayes_empirical",
+        5: "log_reg",
+        6: "elo"
+    }
 
+    model_predictions = {name: "-" for name in model_map.values()}  # Alapértelmezett érték '-'
+
+    for pred in predictions:
+        model_name = model_map.get(pred["model_id"])
+        if model_name:
+            model_predictions[model_name] = f"{pred['predicted_outcome']} ({pred['probability']}%)"
+
+    return model_predictions
 
 def fill_simulation_predictions(simulation_id, predictions):
     connection = get_db_connection()
@@ -60,7 +101,7 @@ def fill_simulation_predictions(simulation_id, predictions):
             all_predictions_completed = False
 
     cursor.execute("""
-        UPDATE simulations SET total_profit_loss = %s WHERE id = %s
+        UPDATE strategies SET total_profit_loss = %s WHERE id = %s
     """, (total_profit, simulation_id))
 
     connection.commit()
@@ -68,7 +109,6 @@ def fill_simulation_predictions(simulation_id, predictions):
     connection.close()
 
     return all_predictions_completed
-
 
 def update_simulation_profit(match_group_id):
     connection = get_db_connection()
@@ -110,7 +150,7 @@ def update_simulation_profit(match_group_id):
                 total_profit -= stake  # vesztes tippnél a tét elveszik
 
         cursor.execute("""
-            UPDATE simulations
+            UPDATE strategies
             SET total_profit_loss = %s
             WHERE match_group_id = %s
         """, (total_profit, match_group_id))
@@ -122,48 +162,6 @@ def update_simulation_profit(match_group_id):
     finally:
         cursor.close()
         connection.close()
-
-
-def get_fixture_result(fixture_id):
-    connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
-
-    cursor.execute("""
-        SELECT actual_result, odds_home, odds_draw, odds_away FROM fixtures WHERE id = %s AND status = 'FT'
-    """, (fixture_id,))
-
-    result = cursor.fetchone()
-    cursor.close()
-    connection.close()
-
-    return result
-
-def is_simulation_completed(simulation_id):
-    connection = get_db_connection()
-    cursor = connection.cursor()
-
-    cursor.execute("""
-        SELECT COUNT(*) FROM simulation_predictions WHERE simulation_id = %s AND was_correct IS NULL
-    """, (simulation_id,))
-
-    incomplete = cursor.fetchone()[0]
-    cursor.close()
-    connection.close()
-
-    return incomplete == 0  # Ha 0, akkor minden mérkőzés kész.
-
-
-def get_all_strategies():
-    connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
-
-    cursor.execute("SELECT id, strategy_name FROM strategies")
-    strategies = cursor.fetchall()
-
-    cursor.close()
-    connection.close()
-
-    return strategies
 
 def evaluate_predictions(fixture_id, home_score, away_score):
     """Frissíti a model_predictions táblában a was_correct mezőt, de csak ha még nincs beállítva."""
@@ -208,6 +206,3 @@ def evaluate_predictions(fixture_id, home_score, away_score):
     connection.close()
 
     print(f"✅ Mérkőzés (ID: {fixture_id}) kiértékelve. {len(updates)} új predikció frissítve.")
-
-
-

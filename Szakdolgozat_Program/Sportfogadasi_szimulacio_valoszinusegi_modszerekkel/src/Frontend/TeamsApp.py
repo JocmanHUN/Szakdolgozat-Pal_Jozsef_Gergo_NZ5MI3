@@ -2,7 +2,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from src.Backend.API.teams import get_teams, get_team_statistics
-from src.Backend.helpersAPI import write_to_teams, read_from_teams, read_from_cards, write_to_cards
+from src.Backend.DB.statistics import read_from_cards, write_to_cards
+from src.Backend.DB.teams import write_to_teams
 from src.Frontend.helpersGUI import save_leagues_if_not_exists
 from PIL import Image, ImageTk
 import requests

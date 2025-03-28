@@ -1,5 +1,5 @@
 from src.Backend.API.fixtures import save_pre_match_fixtures
-from src.Backend.helpersAPI import update_fixtures_status
+from src.Backend.DB.fixtures import update_fixtures_status
 from src.Frontend.SportsApp import SportsApp
 import tkinter as tk
 from tkinter import messagebox

@@ -1,6 +1,6 @@
 from src.Backend.API.endpoints import TEAMS, TEAM_STATISTICS
 from src.Backend.API.make_api_request import make_api_request
-from src.Backend.helpersAPI import write_to_teams, read_from_teams
+from src.Backend.DB.teams import read_from_teams, write_to_teams
 
 
 def get_team_country_by_id(team_id):
