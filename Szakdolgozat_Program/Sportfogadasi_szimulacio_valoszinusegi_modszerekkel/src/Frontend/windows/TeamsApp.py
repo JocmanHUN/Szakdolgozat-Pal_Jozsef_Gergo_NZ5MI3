@@ -360,5 +360,3 @@ class TeamsApp(tk.Frame):
                 red_cards = existing_cards[0].get(f'red_cards_{interval.replace("-", "_")}', 0) or 0 if len(
                     existing_cards) > 0 else cards['red'].get(interval, {}).get('total', 0)
                 red_tree.insert("", "end", values=(interval, red_cards))
-
-           

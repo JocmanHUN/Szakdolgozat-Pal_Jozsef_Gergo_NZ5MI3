@@ -1,6 +1,6 @@
 from src.Backend.API.fixtures import save_pre_match_fixtures
 from src.Backend.DB.fixtures import update_fixtures_status
-from src.Frontend.SportsApp import SportsApp
+from src.Frontend.windows.SportsApp import SportsApp
 import tkinter as tk
 from tkinter import messagebox
 

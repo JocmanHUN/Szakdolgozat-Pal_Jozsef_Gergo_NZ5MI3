@@ -16,3 +16,15 @@ def save_leagues_if_not_exists():
         else:
             messagebox.showerror("Hiba", "Nem sikerült lekérni a ligákat az API-ból.")
     return leagues
+
+
+def refresh_main_menu_styles(app):
+    """
+    Ha a jelenlegi nézet MainMenu, frissíti a TreeView stílusát.
+    """
+    current_frame = getattr(app, 'current_frame', None)
+    if current_frame and hasattr(current_frame, 'update_fixture_styles'):
+        current_frame.update_fixture_styles()
+
+selected_fixtures = []
+selected_window = None
