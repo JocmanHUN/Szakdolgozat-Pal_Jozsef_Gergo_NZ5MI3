@@ -124,16 +124,19 @@ def logistic_regression_predict(home_team_id, away_team_id):
     match_features = scaler.transform(match_features)
 
     probs = model.predict_proba(match_features)[0]
+    classes = model.classes_
 
-    # probs[0]: vereség (away win), probs[1]: döntetlen, probs[2]: győzelem (home win)
-    print(f"🔖 Predicted probabilities: Home Win: {probs[2]}, Draw: {probs[1]}, Away Win: {probs[0]}")
+    prob_dict = {"1": 0.0, "X": 0.0, "2": 0.0}
+    for i, cls in enumerate(classes):
+        if cls == 2:
+            prob_dict["1"] = float(round(probs[i] * 100, 2))
+        elif cls == 1:
+            prob_dict["X"] = float(round(probs[i] * 100, 2))
+        elif cls == 0:
+            prob_dict["2"] = float(round(probs[i] * 100, 2))
 
-    return {
-        "1": float(round(probs[2] * 100, 2)),
-        "X": float(round(probs[1] * 100, 2)),
-        "2": float(round(probs[0] * 100, 2))
-    }
-
+    print(f"🔖 Predicted probabilities: Home Win: {prob_dict['1']}, Draw: {prob_dict['X']}, Away Win: {prob_dict['2']}")
+    return prob_dict
 
 
 def get_average_team_statistics(team_id, num_matches=10):
