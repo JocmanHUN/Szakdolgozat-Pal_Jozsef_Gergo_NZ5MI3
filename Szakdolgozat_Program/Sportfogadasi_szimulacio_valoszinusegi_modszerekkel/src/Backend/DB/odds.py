@@ -161,7 +161,6 @@ def get_best_odds_for_fixture(fixture_id, predicted_outcome):
         "X": "draw_odds",
         "2": "away_odds"
     }.get(predicted_outcome, None)
-    print(column_name,predicted_outcome)
     if column_name is None:
         return None, None  # Ha a modell érvénytelen eredményt adott vissza
 
@@ -174,12 +173,9 @@ def get_best_odds_for_fixture(fixture_id, predicted_outcome):
     """
 
     try:
-        print("Folytatódik")
         cursor.execute(query, (fixture_id,))
         result = cursor.fetchone()
-        print(f"Ita: {result}")
         if result:
-            print(result)
             return result
         return None, None
 

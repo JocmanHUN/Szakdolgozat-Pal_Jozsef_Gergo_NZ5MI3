@@ -3,8 +3,9 @@ from src.Backend.API.helpersAPI import get_next_days_dates
 from src.Backend.API.make_api_request import make_api_request
 from src.Backend.API.odds import fetch_odds_for_fixture
 from src.Backend.DB.fixtures import read_from_fixtures, write_to_fixtures, read_head_to_head_stats, \
-    check_h2h_match_exists
+    check_h2h_match_exists, update_fixture_status, get_fixtures_with_updatable_status
 from src.Backend.DB.statistics import read_from_match_statistics, write_to_match_statistics
+from src.Backend.DB.utils import normalize_date
 
 
 def get_league_id_by_fixture(fixture_id):
@@ -266,3 +267,47 @@ def get_head_to_head_stats(home_team_id, away_team_id):
     all_matches = existing_h2h_matches + new_h2h_matches
     print(f"📊 Összesen {len(all_matches)} H2H meccs visszaadva ({home_team_id} vs {away_team_id})")
     return all_matches
+
+def update_fixtures():
+    """
+    Lekérdezi az adatbázisból azokat a mérkőzéseket, amelyek státusza nem végleges (FT),
+    majd az API-ból frissíti őket, és elmenti a változásokat.
+    """
+    fixtures_to_update = get_fixtures_with_updatable_status()
+    if not fixtures_to_update:
+        print("⚠️ Nincs frissítendő mérkőzés az adatbázisban.")
+        return
+
+    print(f"\n🔄 Frissítendő mérkőzések száma: {len(fixtures_to_update)}")
+    updates = []
+
+    for fixture in fixtures_to_update:
+        fixture_id = str(fixture["id"])
+        current_status = fixture["status"]
+        current_home = fixture.get("score_home")
+        current_away = fixture.get("score_away")
+
+        params = {'id': fixture_id, 'timezone': 'Europe/Budapest'}
+        response = make_api_request(FIXTURES, params=params)
+
+        if not response or not response.get("response"):
+            print(f"⚠️ API nem adott választ a meccsre: {fixture_id}")
+            continue
+
+        api_fixture = response["response"][0]
+
+        new_status = api_fixture["fixture"]["status"]["short"]
+        new_date = normalize_date(api_fixture["fixture"]["date"])
+        home_score = api_fixture["score"]["fulltime"].get("home")
+        away_score = api_fixture["score"]["fulltime"].get("away")
+
+        print(f"📘 [{fixture_id}] {current_status} → {new_status} | "
+              f"{current_home}-{current_away} → {home_score}-{away_score}")
+
+        updates.append((new_status, new_date, home_score, away_score, fixture_id))
+
+    if updates:
+        update_fixture_status(updates)
+        print(f"\n✅ Összesen {len(updates)} mérkőzés frissítve.")
+    else:
+        print("ℹ️ Nincs új adat a frissítéshez.")

@@ -78,100 +78,68 @@ def read_from_fixtures(league_id, season, from_date=None, to_date=None):
         cursor.close()
         connection.close()
 
-def update_fixtures_status():
+def update_fixture_status(updates):
     """
-    Csak azokat az `NS` státuszú mérkőzéseket frissíti, amelyek már lejártak vagy ma játszódnak.
+    Tömbösített adatbázis frissítés.
+    :param updates: Lista tuple-ökből, melyek a következőt tartalmazzák:
+                    (new_status, new_date, home_score, away_score, fixture_id)
     """
-
     connection = get_db_connection()
     if connection is None:
-        print("Nem sikerült csatlakozni az adatbázishoz.")
+        print("❌ Nem sikerült csatlakozni az adatbázishoz.")
         return
 
-    cursor = connection.cursor(dictionary=True)
+    cursor = connection.cursor()
 
     try:
-        # **1. Lekérdezzük azokat az `NS` státuszú mérkőzéseket, amelyek már lejártak vagy ma vannak.**
-        query = """
-            SELECT id, status, DATE_FORMAT(date, '%Y-%m-%dT%H:%i:%sZ') as date, score_home, score_away 
-            FROM fixtures 
-            WHERE status = 'NS' AND date <= NOW()
+        update_query = """
+            UPDATE fixtures
+            SET 
+                status = %s,
+                date = %s,
+                score_home = %s,
+                score_away = %s
+            WHERE id = %s
         """
-        cursor.execute(query)
-        fixtures = cursor.fetchall()
-
-        if not fixtures:
-            print("Nincs frissítendő mérkőzés.")
-            return
-
-        updates = []
-
-        # **2. Egyenként kérjük le az API-ból az adatokat**
-        for fixture in fixtures:
-            fixture_id = str(fixture["id"])
-            url = f"{BASE_URL}fixtures"
-            headers = {
-                'x-apisports-key': API_KEY,
-                'x-rapidapi-host': HOST
-            }
-            params = {'id': fixture_id, 'timezone': 'Europe/Budapest'}
-
-            response = requests.get(url, headers=headers, params=params)
-            response.raise_for_status()
-            api_data = response.json().get("response", [])
-            print(api_data)
-            if not api_data:
-                continue  # Ha az API nem adott vissza adatot, lépjünk tovább
-
-            api_fixture = api_data[0]
-
-            # Új adatok
-            new_status = api_fixture["fixture"]["status"]["short"]
-            new_date = normalize_date(api_fixture["fixture"]["date"])
-
-            # **Ellenőrizzük, hogy az eredmény nem None**
-            home_score = api_fixture["score"]["fulltime"].get("home")
-            away_score = api_fixture["score"]["fulltime"].get("away")
-
-            # Ha nincs eredmény, állítsuk NULL-ra
-            home_score = home_score if home_score is not None else None
-            away_score = away_score if away_score is not None else None
-
-            # **Ellenőrizzük, hogy minden szükséges adat megvan-e**
-            if not all([new_status, new_date, fixture_id]):
-                print(f"HIBA: Hiányzó adatok a mérkőzés frissítéséhez: {fixture_id}")
-                continue
-
-            updates.append((new_status, new_date, home_score, away_score, fixture_id))
-
-        # **3. Debug: Ellenőrizzük az updates listát**
-        print(f"Frissítendő mérkőzések száma: {len(updates)}")
-        for update in updates:
-            if len(update) != 5:
-                print(f"HIBA: Hibás tuple méret az updates listában: {update}")
-
-        # **4. Tömbösített adatbázis frissítés, ha van változás**
-        if updates:
-            update_query = """
-                UPDATE fixtures
-                SET 
-                    status = %s,
-                    date = %s,
-                    score_home = %s,
-                    score_away = %s
-                WHERE id = %s
-            """
-            cursor.executemany(update_query, updates)
-            connection.commit()
-            print(f"{len(updates)} mérkőzés frissítve.")
-            print(updates)
-
-        else:
-            print("Nincs változás az adatbázisban.")
-
+        cursor.executemany(update_query, updates)
+        connection.commit()
+        print(f"✅ {cursor.rowcount} mérkőzés frissítve az adatbázisban.")
+    except Exception as e:
+        print(f"❌ Hiba történt az adatbázis frissítésekor: {e}")
+        connection.rollback()
     finally:
         cursor.close()
         connection.close()
+
+def get_fixtures_with_updatable_status():
+    """
+    Lekéri azokat a meccseket, amelyek frissíthetők:
+    - Nem végződtek még (`FT`),
+    - És/vagy NS státuszúak, de már legalább 2 órája kezdődniük kellett volna.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz.")
+        return []
+
+    cursor = connection.cursor(dictionary=True)
+    try:
+        query = """
+            SELECT id, status, date, score_home, score_away
+            FROM fixtures
+            WHERE 
+                status IN ('NS', '1H', 'HT', '2H', 'ET', 'BT', 'P', 'SUSP', 'INT')
+                AND (
+                status != 'NS'
+                OR (status = 'NS' AND TIMESTAMPDIFF(MINUTE, date, NOW()) >= 120)
+                )
+        """
+        cursor.execute(query)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        connection.close()
+
 
 def get_last_matches(team_id, opponent_id=None, num_matches=10):
     """
