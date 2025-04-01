@@ -1,5 +1,4 @@
-from src.Backend.API.fixtures import save_pre_match_fixtures
-from src.Backend.DB.fixtures import update_fixtures_status
+from src.Backend.API.fixtures import save_pre_match_fixtures, update_fixtures
 from src.Frontend.windows.SportsApp import SportsApp
 import tkinter as tk
 from tkinter import messagebox
@@ -15,7 +14,7 @@ def main():
     if response:  # Ha a felhasználó Igen-t választott
         print("🔄 Mérkőzések frissítése...")
         save_pre_match_fixtures()
-        update_fixtures_status()
+        update_fixtures()
         print("✅ Frissítés kész!")
 
     # Az alkalmazás főablakának indítása

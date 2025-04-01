@@ -187,8 +187,6 @@ class SelectedFixturesWindow(tk.Toplevel):
             fixture_id = fixture[0]  # Az első érték a mérkőzés ID-ja
             save_match_to_group(match_group_id, fixture_id)
 
-        messagebox.showinfo("Siker", f"A '{match_group_name}' nevű mérkőzéscsoport sikeresen mentve!",parent=self)
-
         return match_group_id  # 🔹 Az ID-t visszaadjuk a hívó függvénynek
 
     def sort_treeview(self, column):
