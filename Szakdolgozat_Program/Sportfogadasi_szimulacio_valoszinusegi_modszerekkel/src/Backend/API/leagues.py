@@ -1,6 +1,6 @@
 from src.Backend.API.endpoints import LEAGUES
 from src.Backend.API.make_api_request import make_api_request
-from src.Backend.DB.leagues import read_from_leagues
+from src.Backend.DB.leagues import read_from_leagues, write_to_leagues
 
 
 def get_leagues():
