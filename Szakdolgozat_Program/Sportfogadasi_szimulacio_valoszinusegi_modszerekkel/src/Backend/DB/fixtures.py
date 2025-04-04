@@ -1,11 +1,7 @@
 import mysql.connector
-import requests
-
 from src.Backend.DB.connection import get_db_connection
 from src.Backend.DB.statistics import read_from_match_statistics
 from src.Backend.DB.teams import get_or_create_team
-from src.Backend.DB.utils import normalize_date
-from src.config import BASE_URL, API_KEY, HOST
 
 
 def write_to_fixtures(data):
@@ -291,19 +287,27 @@ def check_h2h_match_exists(match_id):
     """
     connection = get_db_connection()
     if connection is None:
+        print("❌ Nincs adatbáziskapcsolat (check_h2h_match_exists).")
         return False
 
     cursor = connection.cursor()
-    query = """
-        SELECT id FROM fixtures 
-        WHERE id = %s AND status NOT IN ('NS', 'TBD', 'POSTP')
-    """
-    cursor.execute(query, (match_id,))
-    result = cursor.fetchone()
-    cursor.close()
-    connection.close()
+    try:
+        query = """
+            SELECT id FROM fixtures 
+            WHERE id = %s AND status NOT IN ('NS', 'TBD', 'POSTP')
+        """
+        cursor.execute(query, (match_id,))
+        result = cursor.fetchone()
+        return result is not None
 
-    return result is not None
+    except Exception as e:
+        print(f"❌ Hiba történt a check_h2h_match_exists során: {e}")
+        return False
+
+    finally:
+        cursor.close()
+        connection.close()
+
 
 def get_pre_match_fixtures():
     """
@@ -372,15 +376,51 @@ def delete_fixture_by_id(fixture_id):
         connection.close()
 
 def get_fixture_result(fixture_id):
+    """
+    Visszaadja a mérkőzés valós eredményét és az oddsokat, ha a mérkőzés lezárult.
+    """
     connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
+    if connection is None:
+        print("❌ Nincs adatbáziskapcsolat (get_fixture_result).")
+        return None
 
-    cursor.execute("""
-        SELECT actual_result, odds_home, odds_draw, odds_away FROM fixtures WHERE id = %s AND status = 'FT'
-    """, (fixture_id,))
+    try:
+        cursor = connection.cursor(dictionary=True)
 
-    result = cursor.fetchone()
-    cursor.close()
-    connection.close()
+        # Lekérdezzük az eredményt és státuszt
+        cursor.execute("""
+            SELECT score_home, score_away, status
+            FROM fixtures
+            WHERE id = %s
+        """, (fixture_id,))
+        fixture = cursor.fetchone()
 
-    return result
+        if not fixture or fixture["status"] != "FT":
+            return None
+
+        # Lekérdezzük az oddsokat (pl. a 1-es bookmaker_id alapján)
+        cursor.execute("""
+            SELECT home_odds, draw_odds, away_odds
+            FROM odds
+            WHERE fixture_id = %s AND bookmaker_id = 1
+            ORDER BY updated_at DESC
+            LIMIT 1
+        """, (fixture_id,))
+        odds = cursor.fetchone()
+
+        return {
+            "score_home": fixture["score_home"],
+            "score_away": fixture["score_away"],
+            "odds_home": odds["home_odds"] if odds else None,
+            "odds_draw": odds["draw_odds"] if odds else None,
+            "odds_away": odds["away_odds"] if odds else None
+        }
+
+    except Exception as e:
+        print(f"❌ Hiba történt a get_fixture_result során: {e}")
+        return None
+
+    finally:
+        cursor.close()
+        connection.close()
+

@@ -90,10 +90,8 @@ def get_team_id_by_name(team_name):
         print(f"Database read error for team: {err}")
         return None
     finally:
-        if cursor:
-            cursor.close()  # Bezárjuk a kurzort
-        if connection:
-            connection.close()  # Bezárjuk az adatbázis kapcsolatot
+        cursor.close()
+        connection.close()
 
 def write_league_id_to_team(team_id, league_id):
     """
@@ -102,13 +100,9 @@ def write_league_id_to_team(team_id, league_id):
     :param team_id: A frissítendő csapat azonosítója.
     :param league_id: A liga azonosító, amit be kell állítani.
     """
-    connection = None
-    cursor = None
-
+    connection = get_db_connection()
+    cursor = connection.cursor()
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor()
-
         update_query = """
             UPDATE teams
             SET league_id = %s
@@ -127,19 +121,17 @@ def write_league_id_to_team(team_id, league_id):
         print(f"❌ Hiba történt a liga frissítésekor az adatbázisban: {e}")
 
     finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        cursor.close()
+        connection.close()
 
 def get_league_by_team(team_id):
     """
     Lekéri az adott csapat aktuális ligáját az adatbázisból.
     Az utolsó bejegyzett mérkőzés alapján határozza meg a ligát.
     """
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
 
         query = """
             SELECT league_id 
@@ -168,15 +160,22 @@ def get_team_name_from_db(team_id):
     """
     Lekéri a csapat nevét az adatbázisból a megadott csapat ID alapján.
     """
-    connection = get_db_connection()  # Az adatbázis kapcsolat itt jön létre
+    connection = get_db_connection()
     if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz (get_team_name_from_db).")
         return 'Unknown'
 
     cursor = connection.cursor(dictionary=True)
-    query = "SELECT name FROM teams WHERE id = %s"
-    cursor.execute(query, (team_id,))
-    result = cursor.fetchone()
-    cursor.close()
-    connection.close()
+    try:
+        query = "SELECT name FROM teams WHERE id = %s"
+        cursor.execute(query, (team_id,))
+        result = cursor.fetchone()
+        return result['name'] if result else 'Unknown'
 
-    return result['name'] if result else 'Unknown'
+    except Exception as e:
+        print(f"❌ Hiba történt a get_team_name_from_db során: {e}")
+        return 'Unknown'
+
+    finally:
+        cursor.close()
+        connection.close()
