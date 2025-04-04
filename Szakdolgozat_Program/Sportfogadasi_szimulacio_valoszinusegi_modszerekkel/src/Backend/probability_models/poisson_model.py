@@ -53,6 +53,7 @@ def poisson_probability(expected_goals, actual_goals):
 def poisson_predict(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
     """
     A Poisson-eloszlás segítségével kiszámítja a mérkőzés 1X2 valószínűségeit, százalékban kifejezve.
+    Az eredményeket normalizálja, hogy pontosan 100%-ot adjanak ki.
     """
     home_avg_goals, home_avg_conceded = calculate_weighted_goal_expectancy(home_team_id, num_matches, decay_factor)
     away_avg_goals, away_avg_conceded = calculate_weighted_goal_expectancy(away_team_id, num_matches, decay_factor)
@@ -63,27 +64,33 @@ def poisson_predict(home_team_id, away_team_id, num_matches=10, decay_factor=0.9
     home_expected_goals = (home_avg_goals + away_avg_conceded) / 2
     away_expected_goals = (away_avg_goals + home_avg_conceded) / 2
 
-    # Dinamikus maximum gólszám meghatározása
-    max_goals = int(max(home_expected_goals, away_expected_goals) * 2)
-    if max_goals < 3:
-        max_goals = 3  # Minimális gólszám a biztonság kedvéért
+    max_goals = 5  # Itt fix 0-5 gólig számolunk (tehát 6x6 mátrix)
 
     result_matrix = np.zeros((max_goals + 1, max_goals + 1))
 
     for home_goals in range(max_goals + 1):
         for away_goals in range(max_goals + 1):
-            result_matrix[home_goals, away_goals] = poisson_probability(home_expected_goals,
-                                                                        home_goals) * poisson_probability(
-                away_expected_goals, away_goals)
+            prob = poisson_probability(home_expected_goals, home_goals) * \
+                   poisson_probability(away_expected_goals, away_goals)
+            result_matrix[home_goals, away_goals] = prob
 
-    home_win_prob = np.sum(np.tril(result_matrix, -1)) * 100  # Hazai győzelem
-    draw_prob = np.sum(np.diag(result_matrix)) * 100  # Döntetlen
-    away_win_prob = np.sum(np.triu(result_matrix, 1)) * 100  # Vendég győzelem
+    # Nyers valószínűségek
+    home_raw = np.sum(np.tril(result_matrix, -1))
+    draw_raw = np.sum(np.diag(result_matrix))
+    away_raw = np.sum(np.triu(result_matrix, 1))
+    total_raw = home_raw + draw_raw + away_raw
+
+    # Normalizált értékek
+    home_win_prob = (home_raw / total_raw) * 100
+    draw_prob = (draw_raw / total_raw) * 100
+    away_win_prob = (away_raw / total_raw) * 100
 
     return {
         "1": float(round(home_win_prob, 2)),
         "X": float(round(draw_prob, 2)),
         "2": float(round(away_win_prob, 2))
     }
+
+
 
 
