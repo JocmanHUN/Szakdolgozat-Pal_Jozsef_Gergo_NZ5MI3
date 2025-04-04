@@ -1,3 +1,5 @@
+from tkinter import messagebox
+
 import mysql.connector
 
 from src.Backend.DB.connection import get_db_connection
@@ -106,43 +108,101 @@ def load_simulations_from_db():
 
 def create_simulation(match_group_id, strategy_id):
     connection = get_db_connection()
+    if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz (create_simulation).")
+        return None
+
     cursor = connection.cursor()
+    try:
+        # 🔍 Ellenőrizzük, hogy már létezik-e ilyen szimuláció
+        cursor.execute("""
+            SELECT id FROM simulations WHERE match_group_id = %s AND strategy_id = %s
+        """, (match_group_id, strategy_id))
+        existing_simulation = cursor.fetchone()
 
-    # 🔍 Ellenőrizzük, hogy már létezik-e ilyen szimuláció
-    cursor.execute("""
-        SELECT id FROM simulations WHERE match_group_id = %s AND strategy_id = %s
-    """, (match_group_id, strategy_id))
-    existing_simulation = cursor.fetchone()
+        if existing_simulation:
+            return existing_simulation[0]
 
-    if existing_simulation:
+        # ➕ Új szimuláció beszúrása
+        cursor.execute("""
+            INSERT INTO simulations (match_group_id, strategy_id, total_profit_loss, simulation_date) 
+            VALUES (%s, %s, 0, NOW())
+        """, (match_group_id, strategy_id))
+
+        simulation_id = cursor.lastrowid
+        connection.commit()
+        return simulation_id
+
+    except Exception as e:
+        print(f"❌ Hiba történt a create_simulation során: {e}")
+        return None
+
+    finally:
         cursor.close()
         connection.close()
-        return existing_simulation[0]
-
-    # ➕ Új szimuláció beszúrása
-    cursor.execute("""
-        INSERT INTO simulations (match_group_id, strategy_id, total_profit_loss, simulation_date) 
-        VALUES (%s, %s, 0, NOW())
-    """, (match_group_id, strategy_id))
-
-    simulation_id = cursor.lastrowid
-    connection.commit()
-    cursor.close()
-    connection.close()
-
-    return simulation_id
 
 
-def is_simulation_completed(simulation_id):
+def load_aggregated_simulations():
+    """
+    Lekérdezi a befejezett mérkőzéscsoportokhoz tartozó szimulációk összesített adatait.
+    """
     connection = get_db_connection()
-    cursor = connection.cursor()
+    if not connection:
+        print("❌ Nincs adatbáziskapcsolat!")
+        return []
 
-    cursor.execute("""
-        SELECT COUNT(*) FROM simulation_predictions WHERE simulation_id = %s AND was_correct IS NULL
-    """, (simulation_id,))
+    cursor = connection.cursor(dictionary=True)
+    results = []
 
-    incomplete = cursor.fetchone()[0]
-    cursor.close()
-    connection.close()
+    try:
+        sql = """
+        SELECT s.id AS id,
+               mg.name AS sim_name,
+               s.strategy_id,
+               s.total_profit_loss,
+               s.simulation_date
+        FROM simulations s
+        JOIN match_groups mg ON s.match_group_id = mg.id
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM match_group_fixtures mgf
+            JOIN fixtures f ON mgf.fixture_id = f.id
+            WHERE mgf.match_group_id = mg.id
+              AND f.status NOT IN ('FT','AET','PEN')
+        )
+        ORDER BY s.simulation_date DESC
+        """
+        cursor.execute(sql)
+        results = cursor.fetchall()
 
-    return incomplete == 0  # Ha 0, akkor minden mérkőzés kész.
+    except Exception as e:
+        print(f"❌ Hiba a load_aggregated_simulations lekérdezésekor: {e}")
+
+    finally:
+        cursor.close()
+        connection.close()
+
+    return results
+
+def load_simulations_db(simulation_combo):
+    """Szimulációk betöltése a legördülő menübe"""
+    connection = get_db_connection()
+    if connection is None:
+        messagebox.showerror("Hiba", "Nem sikerült csatlakozni az adatbázishoz")
+        return
+
+    cursor = connection.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT id, name FROM match_groups")
+        simulations = cursor.fetchall()
+
+        if not simulations:
+            messagebox.showinfo("Információ", "Nincs elérhető szimuláció az adatbázisban")
+            return
+        return simulations
+    except Exception as e:
+        messagebox.showerror("Hiba", f"Hiba történt a szimulációk betöltése során: {e}")
+
+    finally:
+        cursor.close()
+        connection.close()
