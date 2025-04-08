@@ -1,8 +1,5 @@
-import time
-from asyncio import timeout
-
 from src.Backend.DB.connection import get_db_connection
-from src.Backend.DB.fixtures import get_fixture_result, fetch_fixtures_for_simulation
+from src.Backend.DB.fixtures import get_fixture_result
 from src.Backend.DB.odds import get_best_odds_for_fixture
 from src.Backend.strategies.fibonacci import fibonacci
 from src.Backend.strategies.flatBetting import flat_betting
@@ -100,78 +97,6 @@ def get_predictions_for_fixture(fixture_id):
         cursor.close()
         connection.close()
 
-def fill_simulation_predictions(simulation_id, predictions):
-    connection = get_db_connection()
-    if connection is None:
-        print("❌ Nem sikerült csatlakozni az adatbázishoz (fill_simulation_predictions).")
-        return False
-
-    cursor = connection.cursor()
-    try:
-        total_profit = 0
-        all_predictions_completed = True
-        stake = 10  # fix tét
-
-        for pred in predictions:
-            fixture_result = get_fixture_result(pred["fixture_id"])
-
-            if fixture_result:
-                score_home = fixture_result.get("score_home")
-                score_away = fixture_result.get("score_away")
-
-                if score_home is None or score_away is None:
-                    all_predictions_completed = False
-                    continue
-
-                if score_home > score_away:
-                    actual_result = "1"
-                elif score_home < score_away:
-                    actual_result = "2"
-                else:
-                    actual_result = "X"
-
-                was_correct = int(pred["predicted_outcome"] == actual_result)
-
-                odds_mapping = {
-                    '1': fixture_result['odds_home'],
-                    'X': fixture_result['odds_draw'],
-                    '2': fixture_result['odds_away']
-                }
-                odds = odds_mapping.get(pred["predicted_outcome"])
-
-                if odds is None:
-                    print(f"⚠️ Hiányzó odds a tipphez: {pred['predicted_outcome']} (fixture {pred['fixture_id']})")
-                    all_predictions_completed = False
-                    continue
-
-                profit = stake * (odds - 1) if was_correct else -stake
-                total_profit += profit
-
-                cursor.execute("""
-                   UPDATE model_predictions 
-                    SET was_correct = %s
-                    WHERE fixture_id = %s AND model_id = %s AND match_group_id = %s
-                """, (was_correct, pred["fixture_id"], pred["model_id"]))
-
-            else:
-                all_predictions_completed = False
-
-        cursor.execute("""
-            UPDATE strategies SET total_profit_loss = %s WHERE id = %s
-        """, (total_profit, simulation_id))
-
-        connection.commit()
-        return all_predictions_completed
-
-    except Exception as e:
-        print(f"❌ Hiba történt a fill_simulation_predictions során: {e}")
-        return False
-
-    finally:
-        cursor.close()
-        connection.close()
-
-
 def evaluate_predictions(fixture_id, home_score, away_score):
     """Frissíti a model_predictions táblában a was_correct mezőt, de csak ha még nincs beállítva."""
     connection = get_db_connection()
@@ -234,17 +159,18 @@ def update_strategy_profit(sim_id, completed_fixtures):
         completed_fixtures.sort(key=lambda x: x.get("match_date"))
         strategies = ["1", "2", "3", "4", "5"]
         base_stake = 10.0
-        initial_bankroll = 10  # Kezdeti bankroll, megegyezik a GUI-val
+        initial_bankroll = 10  # Kezdeti bankroll
 
         for strategy_id in strategies:
             strategy_profit = 0.0
+            model_profits = [0.0] * 6  # Lista az egyes modellek profitjának tárolására
 
             for model_id in range(1, 7):
                 model_profit = 0.0
                 stake = base_stake
                 fib_seq = [1, 1, 2, 3, 5, 8, 13, 21, 34]
                 fib_index = 0
-                bankroll = initial_bankroll  # Bankroll inicializálása
+                bankroll = initial_bankroll
 
                 for fixture in completed_fixtures:
                     fixture_id = fixture["fixture_id"]
@@ -259,97 +185,90 @@ def update_strategy_profit(sim_id, completed_fixtures):
                         WHERE fixture_id = %s AND match_group_id = %s AND model_id = %s
                     """, (fixture_id, sim_id, model_id))
                     prediction = cursor.fetchone()
-
                     if not prediction:
                         continue
 
                     was_correct = prediction["was_correct"]
                     predicted_outcome = prediction["predicted_outcome"]
-
                     best_odds = get_best_odds_for_fixture(fixture_id, predicted_outcome)
                     odds = best_odds.get("selected_odds") if best_odds else None
-
                     if not odds or odds <= 1.01:
                         continue
 
                     result = "✅ Győztes tipp" if was_correct else "❌ Vesztes tipp"
 
-                    if strategy_id == "1":  # Flat Betting
+                    if strategy_id == "1":  # Flat
                         match_profit = stake * (odds - 1) if was_correct else -stake
                         model_profit += match_profit
-                        result_str = "✅ Győztes tipp" if was_correct else "❌ Vesztes tipp"
-                        print(
-                            f"[Flat] Modell {model_id}, Meccs {fixture_id} - {result_str}, Odds: {odds}, Meccs profit: {match_profit:.2f}, Összesített: {model_profit:.2f}")
 
-                    elif strategy_id == "2":  # Value Betting
+                    elif strategy_id == "2":  # Value
                         db_prediction = get_prediction_by_model_id(fixture_id, model_id, sim_id)
                         model_prob = float(str(db_prediction["probability"]).replace(",", ".")) / 100
                         if (model_prob * odds) > 1:
-                            profit = stake * (odds - 1) if was_correct else -stake
-                            model_profit += profit
-                            print(
-                                f"[Value] Modell {model_id}, Meccs {fixture_id} - {result}, Odds: {odds}, Profit: {model_profit:.2f}")
-                        else:
-                            print(f"[Value] Modell {model_id}, Meccs {fixture_id} - Tipp nem érte meg (value alacsony)")
+                            match_profit = stake * (odds - 1) if was_correct else -stake
+                            model_profit += match_profit
 
                     elif strategy_id == "3":  # Martingale
                         if was_correct:
-                            profit = stake * (odds - 1)
-                            model_profit += profit
+                            model_profit += stake * (odds - 1)
                             stake = base_stake
                         else:
                             model_profit -= stake
                             stake *= 2
-                        print(
-                            f"[Martingale] Modell {model_id}, Meccs {fixture_id} - {result}, Tét: {stake}, Profit: {model_profit:.2f}")
 
                     elif strategy_id == "4":  # Fibonacci
                         current_stake = base_stake * fib_seq[fib_index]
                         if was_correct:
-                            profit = current_stake * (odds - 1)
-                            model_profit += profit
+                            model_profit += current_stake * (odds - 1)
                             fib_index = max(0, fib_index - 2)
                         else:
                             model_profit -= current_stake
                             fib_index = min(len(fib_seq) - 1, fib_index + 1)
                         stake = base_stake * fib_seq[fib_index]
-                        print(
-                            f"[Fibonacci] Modell {model_id}, Meccs {fixture_id} - {result}, Tét: {current_stake}, Profit: {model_profit:.2f}")
 
-                    elif strategy_id == "5":  # Kelly Criterion (bankroll-alapú)
+                    elif strategy_id == "5":  # Kelly
                         db_prediction = get_prediction_by_model_id(fixture_id, model_id, sim_id)
                         if not db_prediction:
                             continue
                         model_prob = float(str(db_prediction["probability"]).replace(",", ".")) / 100
                         b = odds - 1
                         kelly_fraction = (model_prob * b - (1 - model_prob)) / b
-
                         if kelly_fraction <= 0:
-                            print(f"[Kelly] Modell {model_id}, Meccs {fixture_id} - Tipp nem érte meg (Kelly ≤ 0)")
                             continue
-
                         current_stake = bankroll * kelly_fraction
-
                         if was_correct:
-                            profit = current_stake * b
-                            bankroll += profit
+                            bankroll += current_stake * b
                         else:
                             bankroll -= current_stake
-
-                        model_profit = bankroll - initial_bankroll  # Profit a kezdeti bankrollhoz képest
-                        print(
-                            f"[Kelly] Modell {model_id}, Meccs {fixture_id} - {result}, Tét: {current_stake:.2f}, Bankroll: {bankroll:.2f}, Profit: {model_profit:.2f}")
+                        model_profit = bankroll - initial_bankroll
 
                 strategy_profit += model_profit
-                print(f"📈 Stratégia {strategy_id}, Modell {model_id} végső profit: {model_profit:.2f}")
+                model_profits[model_id - 1] = model_profit  # mentés a listába
 
+            # Frissítés az adatbázisban
             cursor.execute("""
                 UPDATE simulations
-                SET total_profit_loss = %s
+                SET total_profit_loss = %s,
+                    bayes_classic_profit = %s,
+                    monte_carlo_profit = %s,
+                    poisson_profit = %s,
+                    bayes_empirical_profit = %s,
+                    log_reg_profit = %s,
+                    elo_profit = %s
                 WHERE match_group_id = %s AND strategy_id = %s
-            """, (strategy_profit, sim_id, strategy_id))
+            """, (
+                strategy_profit,
+                model_profits[0],
+                model_profits[1],
+                model_profits[2],
+                model_profits[3],
+                model_profits[4],
+                model_profits[5],
+                sim_id,
+                strategy_id
+            ))
             connection.commit()
-            print(f"✅ Stratégia ID {strategy_id} összesített profitja (match_group_id={sim_id}): {strategy_profit:.2f}")
+            print(f"✅ Stratégia {strategy_id} profitjai elmentve.")
 
     except Exception as e:
         print(f"❌ Hiba történt az update_strategy_profit során: {e}")

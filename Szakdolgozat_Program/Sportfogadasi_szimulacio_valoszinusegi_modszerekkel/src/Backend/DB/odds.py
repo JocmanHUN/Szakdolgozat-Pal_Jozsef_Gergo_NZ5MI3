@@ -1,5 +1,4 @@
 import mysql.connector
-
 from src.Backend.DB.connection import get_db_connection
 
 

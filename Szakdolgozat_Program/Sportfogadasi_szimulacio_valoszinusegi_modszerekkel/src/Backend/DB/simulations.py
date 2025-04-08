@@ -125,8 +125,12 @@ def create_simulation(match_group_id, strategy_id):
 
         # ➕ Új szimuláció beszúrása
         cursor.execute("""
-            INSERT INTO simulations (match_group_id, strategy_id, total_profit_loss, simulation_date) 
-            VALUES (%s, %s, 0, NOW())
+            INSERT INTO simulations (
+                match_group_id, strategy_id, total_profit_loss, simulation_date,
+                bayes_classic_profit, monte_carlo_profit, poisson_profit,
+                bayes_empirical_profit, log_reg_profit, elo_profit
+            )
+            VALUES (%s, %s, 0, NOW(), 0, 0, 0, 0, 0, 0)
         """, (match_group_id, strategy_id))
 
         simulation_id = cursor.lastrowid
@@ -144,7 +148,8 @@ def create_simulation(match_group_id, strategy_id):
 
 def load_aggregated_simulations():
     """
-    Lekérdezi a befejezett mérkőzéscsoportokhoz tartozó szimulációk összesített adatait.
+    Lekérdezi a befejezett mérkőzéscsoportokhoz tartozó szimulációk összesített adatait,
+    beleértve az egyes valószínűségi modellekhez tartozó profitokat is.
     """
     connection = get_db_connection()
     if not connection:
@@ -160,7 +165,13 @@ def load_aggregated_simulations():
                mg.name AS sim_name,
                s.strategy_id,
                s.total_profit_loss,
-               s.simulation_date
+               s.simulation_date,
+               s.bayes_classic_profit,
+               s.monte_carlo_profit,
+               s.poisson_profit,
+               s.bayes_empirical_profit,
+               s.log_reg_profit,
+               s.elo_profit
         FROM simulations s
         JOIN match_groups mg ON s.match_group_id = mg.id
         WHERE NOT EXISTS (
@@ -184,25 +195,59 @@ def load_aggregated_simulations():
 
     return results
 
-def load_simulations_db(simulation_combo):
-    """Szimulációk betöltése a legördülő menübe"""
+def load_simulation_profits_data(strategy_id=None):
+    """Betölti a szimulációs profit adatokat az adatbázisból, csak a lezárult fogadásokra (total_profit_loss != 0)."""
     connection = get_db_connection()
-    if connection is None:
-        messagebox.showerror("Hiba", "Nem sikerült csatlakozni az adatbázishoz")
-        return
+    cursor = connection.cursor()
 
-    cursor = connection.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT id, name FROM match_groups")
-        simulations = cursor.fetchall()
+        if strategy_id is not None:
+            cursor.execute("""
+                SELECT 
+                    s.id, s.strategy_id, 
+                    s.bayes_classic_profit, s.monte_carlo_profit, s.poisson_profit,
+                    s.bayes_empirical_profit, s.log_reg_profit, s.elo_profit,
+                    st.strategy_name
+                FROM simulations s
+                JOIN strategies st ON s.strategy_id = st.id
+                WHERE s.strategy_id = %s AND s.total_profit_loss != 0
+            """, (strategy_id,))
+        else:
+            cursor.execute("""
+                SELECT 
+                    s.id, s.strategy_id, 
+                    s.bayes_classic_profit, s.monte_carlo_profit, s.poisson_profit,
+                    s.bayes_empirical_profit, s.log_reg_profit, s.elo_profit,
+                    st.strategy_name
+                FROM simulations s
+                JOIN strategies st ON s.strategy_id = st.id
+                WHERE s.total_profit_loss != 0
+            """)
 
-        if not simulations:
-            messagebox.showinfo("Információ", "Nincs elérhető szimuláció az adatbázisban")
-            return
-        return simulations
+        rows = cursor.fetchall()
+
+        simulation_data = []
+        for row in rows:
+            simulation_data.append({
+                'id': row[0],
+                'strategy_id': row[1],
+                'bayes_classic_profit': row[2],
+                'monte_carlo_profit': row[3],
+                'poisson_profit': row[4],
+                'bayes_empirical_profit': row[5],
+                'log_reg_profit': row[6],
+                'elo_profit': row[7],
+                'strategy_name': row[8]
+            })
+
+        return simulation_data
+
     except Exception as e:
-        messagebox.showerror("Hiba", f"Hiba történt a szimulációk betöltése során: {e}")
-
+        print(f"Hiba történt a szimulációs adatok betöltésekor: {e}")
+        return []
     finally:
         cursor.close()
         connection.close()
+
+
+
