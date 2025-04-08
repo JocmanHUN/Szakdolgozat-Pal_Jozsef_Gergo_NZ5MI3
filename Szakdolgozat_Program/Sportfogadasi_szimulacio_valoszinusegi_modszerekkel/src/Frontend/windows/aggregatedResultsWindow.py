@@ -9,7 +9,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import seaborn as sns
 from src.Backend.DB.final_summary import fetch_completed_summary
 from src.Backend.DB.predictions import get_all_predictions, get_all_models
-from src.Backend.DB.simulations import load_aggregated_simulations
+from src.Backend.DB.simulations import load_aggregated_simulations, load_simulation_profits_data
 from src.Backend.DB.strategies import get_all_strategies
 
 
@@ -41,11 +41,12 @@ class AggregatedResultsWindow(tk.Toplevel):
         self.predictions_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         self.predictions_frame.rowconfigure(2, weight=1)  # A TreeView része nyújtható
         self.predictions_frame.columnconfigure(0, weight=1)
+        self.model_comparison_frame = ttk.Frame(self.notebook)
 
         # Hozzáadjuk a tabokat a notebookhoz
         self.notebook.add(self.simulations_frame, text="Szimulációk")
         self.notebook.add(self.predictions_frame, text="Modell predikciók")
-
+        self.create_model_comparison_tab()  # ez hozzáadja a fület és felépíti a tartalmat is
         # Változók a szűréshez
         self.active_strategy = tk.IntVar(value=0)  # 0 = minden stratégia
         self.active_model = tk.IntVar(value=0)  # 0 = minden modell
@@ -97,6 +98,9 @@ class AggregatedResultsWindow(tk.Toplevel):
         x = (self.winfo_screenwidth() // 2) - (width // 2)
         y = (self.winfo_screenheight() // 2) - (height // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
+        # A create_widgets vagy __init__ végén:
+        self.model_comparison_frame = ttk.Frame(self.notebook)
+
 
         # Az __init__ metódus végén (a self.geometry() hívás után)
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
@@ -382,20 +386,18 @@ class AggregatedResultsWindow(tk.Toplevel):
         tree_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
 
-        columns = ("id", "sim_name", "strategy", "model", "profit", "date")
+        columns = ("id", "sim_name", "strategy", "profit", "date")
         self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
 
         self.tree.heading("id", text="Sim ID")
         self.tree.heading("sim_name", text="Csoport neve")
         self.tree.heading("strategy", text="Stratégia ID")
-        self.tree.heading("model", text="Modell ID")
         self.tree.heading("profit", text="Total Profit/Loss")
         self.tree.heading("date", text="Dátum")
 
         self.tree.column("id", width=60, anchor="center", minwidth=50)
         self.tree.column("sim_name", width=180, minwidth=120)
         self.tree.column("strategy", width=100, anchor="center", minwidth=80)
-        self.tree.column("model", width=100, anchor="center", minwidth=80)
         self.tree.column("profit", width=150, anchor="e", minwidth=120)
         self.tree.column("date", width=150, minwidth=120)
 
@@ -422,12 +424,12 @@ class AggregatedResultsWindow(tk.Toplevel):
         tree_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
 
-        columns = ("id", "fixture_id", "model_id", "outcome", "probability", "group_id", "correct")
+        columns = ("id", "fixture_id", "model", "outcome", "probability", "group_id", "correct")
         self.pred_tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
 
         self.pred_tree.heading("id", text="Pred ID")
         self.pred_tree.heading("fixture_id", text="Mérkőzés ID")
-        self.pred_tree.heading("model_id", text="Modell ID")
+        self.pred_tree.heading("model", text="Modell")
         self.pred_tree.heading("outcome", text="Predikált kimenet")
         self.pred_tree.heading("probability", text="Valószínűség")
         self.pred_tree.heading("group_id", text="Csoport ID")
@@ -435,7 +437,7 @@ class AggregatedResultsWindow(tk.Toplevel):
 
         self.pred_tree.column("id", width=60, anchor="center", minwidth=50)
         self.pred_tree.column("fixture_id", width=100, anchor="center", minwidth=80)
-        self.pred_tree.column("model_id", width=100, anchor="center", minwidth=80)
+        self.pred_tree.column("model", width=120, anchor="center", minwidth=100)
         self.pred_tree.column("outcome", width=120, anchor="center", minwidth=100)
         self.pred_tree.column("probability", width=100, anchor="e", minwidth=80)
         self.pred_tree.column("group_id", width=100, anchor="center", minwidth=80)
@@ -496,7 +498,6 @@ class AggregatedResultsWindow(tk.Toplevel):
                     sim.get("id", ""),
                     sim.get("sim_name", ""),
                     sim.get("strategy_id", ""),
-                    sim.get("model_id", ""),
                     formatted_profit,
                     formatted_date
                 )
@@ -1167,4 +1168,327 @@ class AggregatedResultsWindow(tk.Toplevel):
 
         return strategy_stats
 
-    
+    def create_model_comparison_tab(self):
+        """Hozzáad egy új fület a modellek összehasonlításához"""
+        self.model_comparison_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.model_comparison_frame, text="Modellek összehasonlítása stratégiák szerint")
+
+        # Betöltjük a szükséges adatokat
+        self.strategies = get_all_strategies()
+        self.models = [
+            "bayes_classic_profit", "monte_carlo_profit", "poisson_profit",
+            "bayes_empirical_profit", "log_reg_profit", "elo_profit"
+        ]
+        self.model_names_comparison = {
+            "bayes_classic_profit": "Bayes Klasszikus",
+            "monte_carlo_profit": "Monte Carlo",
+            "poisson_profit": "Poisson",
+            "bayes_empirical_profit": "Bayes Empirikus",
+            "log_reg_profit": "Logisztikus Regresszió",
+            "elo_profit": "ELO"
+        }
+
+        # Itt betöltjük a szimulációs adatokat
+        try:
+            self.simulation_data = load_simulation_profits_data()
+            print(self.simulation_data)
+            if not self.simulation_data:
+                messagebox.showwarning("Figyelmeztetés", "Nem találhatók szimulációs adatok!")
+        except Exception as e:
+            messagebox.showerror("Hiba", f"Hiba történt az adatok betöltésekor: {e}")
+            self.simulation_data = []
+
+        # Felület létrehozása
+        self.create_comparison_widgets(self.model_comparison_frame)
+        self.update_strategy_stats_comparison(0)
+
+    def create_comparison_widgets(self, parent):
+        """Létrehozza a tab UI elemeit"""
+        main_frame = ttk.Frame(parent)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Stratégia választó
+        strategy_frame = ttk.LabelFrame(main_frame, text="Stratégia kiválasztása", padding=10)
+        strategy_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # "Összes" gomb
+        ttk.Button(
+            strategy_frame,
+            text="Összes stratégia",
+            command=lambda: self.update_strategy_stats_comparison(0)
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Stratégia gombok
+        for strategy in self.strategies:
+            strategy_id = strategy['id']
+            ttk.Button(
+                strategy_frame,
+                text=strategy['strategy_name'],
+                command=lambda sid=strategy_id: self.update_strategy_stats_comparison(sid)
+            ).pack(side=tk.LEFT, padx=5)
+
+        # Eredmények megjelenítése - Notebook a különböző nézeteknek
+        self.notebook = ttk.Notebook(main_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Tab: Statisztikai táblázat
+        self.stats_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.stats_frame, text="Statisztikák")
+
+        # 2. Tab: Diagramok
+        self.chart_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.chart_frame, text="Diagramok")
+
+        # Táblázat létrehozása
+        self.create_comparison_table()
+
+        # Diagram keret létrehozása
+        self.create_chart_area_comparison()
+
+    def create_comparison_table(self):
+        """Létrehozza a statisztikai táblázatot"""
+        # Treeview létrehozása
+        columns = (
+            "model", "avg_profit", "profitable_pct", "max_profit", "min_profit",
+            "median_profit", "profit_std", "max_loss", "median_loss",
+            "loss_std", "median_win", "max_win", "min_win"
+        )
+
+        self.model_comparison_tree = ttk.Treeview(self.stats_frame, columns=columns, show="headings")
+
+        # Oszlopok beállítása
+        self.model_comparison_tree.heading("model", text="Modell")
+        self.model_comparison_tree.heading("profitable_pct", text="Sikeresség %")
+        self.model_comparison_tree.heading("avg_profit", text="Átlagos profit")
+        self.model_comparison_tree.heading("max_profit", text="Max Profit")
+        self.model_comparison_tree.heading("min_profit", text="Min Profit")
+        self.model_comparison_tree.heading("median_profit", text="Profit Medián")
+        self.model_comparison_tree.heading("profit_std", text="Profit Szórás")
+        self.model_comparison_tree.heading("max_loss", text="Max Veszteség")
+        self.model_comparison_tree.heading("median_loss", text="Vesz. Medián")
+        self.model_comparison_tree.heading("loss_std", text="Vesz. Szórás")
+        self.model_comparison_tree.heading("median_win", text="Nyer. Medián")
+        self.model_comparison_tree.heading("max_win", text="Max Nyereség")
+        self.model_comparison_tree.heading("min_win", text="Min Nyereség")
+
+        # Oszlop szélességek
+        col_widths = {
+            "model": 120, "avg_profit": 100, "profitable_pct": 80, "max_profit": 90,
+            "min_profit": 90, "median_profit": 100, "profit_std": 90,
+            "max_loss": 100, "median_loss": 90, "loss_std": 90,
+            "median_win": 90, "max_win": 90, "min_win": 90
+        }
+
+        for col, width in col_widths.items():
+            self.model_comparison_tree.column(col, width=width, anchor="center")
+
+        # Scrollbarok
+        vsb = ttk.Scrollbar(self.stats_frame, orient="vertical", command=self.model_comparison_tree.yview)
+        hsb = ttk.Scrollbar(self.stats_frame, orient="horizontal", command=self.model_comparison_tree.xview)
+        self.model_comparison_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        # Grid elrendezés
+        self.model_comparison_tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+
+        # Reszponzív méretezés
+        self.stats_frame.rowconfigure(0, weight=1)
+        self.stats_frame.columnconfigure(0, weight=1)
+
+    def create_chart_area_comparison(self):
+        """Létrehozza a diagram területet"""
+        # Fő keret
+        self.chart_container = ttk.Frame(self.chart_frame)
+        self.chart_container.pack(fill=tk.BOTH, expand=True)
+
+        # Kezdeti üzenet
+        ttk.Label(
+            self.chart_container,
+            text="Válasszon stratégiát a diagramok megjelenítéséhez",
+            font=("Arial", 12)
+        ).pack(pady=50)
+
+    def update_strategy_stats_comparison(self, strategy_id):
+        strategy_id = int(strategy_id)
+        if strategy_id == 0:
+            filtered_data = load_simulation_profits_data()
+            strategy_name = "Összes stratégia"
+        else:
+            filtered_data = load_simulation_profits_data(strategy_id)
+            strategy_name = next(
+                (s['strategy_name'] for s in self.strategies if s['id'] == strategy_id),
+                f"Stratégia {strategy_id}"
+            )
+
+        if not filtered_data:
+            self.model_comparison_tree.delete(*self.model_comparison_tree.get_children())
+            self.model_comparison_tree.insert("", "end", values=("Nincs elérhető adat", "", "", "", "", "", "", "", "", "", "", ""))
+            self.update_charts_comparison([], "Nincs adat")
+            return
+
+        self.update_stats_table_comparison(filtered_data, strategy_name)
+        self.update_charts_comparison(filtered_data, strategy_name)
+
+    def update_stats_table_comparison(self, data, strategy_name):
+        """Frissíti a statisztikai táblázatot"""
+        # Táblázat ürítése
+        for item in self.model_comparison_tree.get_children():
+            self.model_comparison_tree.delete(item)
+
+        # Minden modell statisztikáinak kiszámítása
+        for model in self.models:
+            model_name = self.model_names_comparison.get(model, model)
+
+            # Modell adatok kinyerése
+            model_profits = [s.get(model, 0) for s in data]
+
+            # Általános statisztikák
+            total_sims = len(model_profits)
+            profitable_sims = sum(1 for p in model_profits if p > 0)
+            profitable_pct = (profitable_sims / total_sims * 100) if total_sims > 0 else 0
+
+            max_profit = max(model_profits) if model_profits else 0
+            min_profit = min(model_profits) if model_profits else 0
+            print(f"[DEBUG] {model_name} profits: {model_profits}")
+            median_profit = statistics.median(model_profits) if model_profits else 0
+            profit_std = statistics.stdev(model_profits) if len(model_profits) > 1 else 0
+            avg_profit = statistics.mean(model_profits) if model_profits else 0
+            # Veszteségek (csak negatív értékek)
+            losses = [abs(p) for p in model_profits if p < 0]
+            max_loss = max(losses) if losses else 0
+            median_loss = statistics.median(losses) if losses else 0
+            loss_std = statistics.stdev(losses) if len(losses) > 1 else 0
+
+            # Nyereségek (csak pozitív értékek)
+            wins = [p for p in model_profits if p > 0]
+            median_win = statistics.median(wins) if wins else 0
+            max_win = max(wins) if wins else 0
+            min_win = min(wins) if wins else 0
+
+            # Sor hozzáadása a táblázathoz
+            self.model_comparison_tree.insert("", "end", values=(
+                model_name,
+                f"{avg_profit:.2f}",
+                f"{profitable_pct:.1f}%",
+                f"{max_profit:.2f}",
+                f"{min_profit:.2f}",
+                f"{median_profit:.2f}",
+                f"{profit_std:.2f}",
+                f"{max_loss:.2f}",
+                f"{median_loss:.2f}",
+                f"{loss_std:.2f}",
+                f"{median_win:.2f}",
+                f"{max_win:.2f}",
+                f"{min_win:.2f}"
+            ))
+
+        # Cím frissítése
+        self.model_comparison_tree.heading("model", text=f"Modell ({strategy_name})")
+
+    def update_charts_comparison(self, data, strategy_name):
+        """Frissíti a diagramokat a kiválasztott stratégiára"""
+        # Előző diagramok törlése
+        for widget in self.chart_container.winfo_children():
+            widget.destroy()
+
+        if not data:
+            ttk.Label(
+                self.chart_container,
+                text="Nincs elérhető adat a kiválasztott stratégiához",
+                font=("Arial", 12)
+            ).pack(pady=50)
+            return
+
+        # 3 diagram létrehozása: boxplot, profit eloszlás, win/loss arány
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+        fig.suptitle(f"Modell teljesítmények - {strategy_name}", fontsize=14)
+
+        # 1. Boxplot diagram
+        self.create_boxplot_comparison(ax1, data)
+
+        # 2. Profit eloszlás
+        self.create_profit_distribution(ax2, data)
+
+        # 3. Win/Loss arány
+        self.create_win_loss_ratio(ax3, data)
+
+        plt.tight_layout()
+
+        # Beágyazás a Tkinter ablakba
+        canvas = FigureCanvasTkAgg(fig, master=self.chart_container)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Navigációs eszköztár
+        toolbar = NavigationToolbar2Tk(canvas, self.chart_container)
+        toolbar.update()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    def create_boxplot_comparison(self, ax, data):
+        """Boxplot diagram készítése a modellek profitjairól"""
+        # Adatok előkészítése
+        plot_data = []
+        labels = []
+
+        for model in self.models:
+            model_profits = [s.get(model, 0) for s in data]
+            if model_profits:
+                plot_data.append(model_profits)
+                labels.append(self.model_names_comparison.get(model, model))  # Itt javítva
+
+        # Boxplot rajzolása
+        ax.boxplot(plot_data, labels=labels, showmeans=True)
+        ax.set_title("Profit eloszlás modellek szerint")
+        ax.set_ylabel("Profit (Ft)")
+        ax.grid(True, alpha=0.3)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+
+    def create_profit_distribution(self, ax, data):
+        """Hisztogram a profit eloszlásáról"""
+        # Minden modell adatainak összegyűjtése
+        for model in self.models:
+            model_profits = [s.get(model, 0) for s in data]
+            model_name = self.model_names_comparison.get(model, model)  # Itt javítva
+
+            if model_profits:
+                sns.histplot(
+                    model_profits,
+                    kde=True,
+                    label=model_name,
+                    alpha=0.6,
+                    ax=ax
+                )
+
+        ax.set_title("Profit eloszlás")
+        ax.set_xlabel("Profit (Ft)")
+        ax.set_ylabel("Gyakoriság")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    def create_win_loss_ratio(self, ax, data):
+        """Win/Loss arány mutatója modellekre bontva"""
+        # Adatok előkészítése
+        win_ratios = []
+        labels = []
+
+        for model in self.models:
+            model_profits = [s.get(model, 0) for s in data]
+            if model_profits:
+                wins = sum(1 for p in model_profits if p > 0)
+                losses = sum(1 for p in model_profits if p < 0)
+                total = wins + losses
+
+                if total > 0:
+                    win_ratio = (wins / total) * 100
+                    win_ratios.append(win_ratio)
+                    labels.append(self.model_names_comparison.get(model, model))  # Itt javítva
+
+        # Oszlopdiagram rajzolása
+        if win_ratios:
+            bars = ax.bar(labels, win_ratios, color='green', alpha=0.6)
+            ax.bar_label(bars, fmt='%.1f%%', padding=3)
+            ax.set_title("Nyertes szimulációk aránya")
+            ax.set_ylabel("Nyertes arány (%)")
+            ax.set_ylim(0, 100)
+            ax.grid(True, alpha=0.3)
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
