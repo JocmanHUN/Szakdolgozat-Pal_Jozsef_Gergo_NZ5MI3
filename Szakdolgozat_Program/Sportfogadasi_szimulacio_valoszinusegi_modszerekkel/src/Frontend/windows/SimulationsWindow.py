@@ -6,6 +6,7 @@ from src.Backend.DB.fixtures import fetch_fixtures_for_simulation
 from src.Backend.DB.predictions import evaluate_predictions, get_predictions_for_fixture, update_strategy_profit
 from src.Backend.DB.simulations import load_simulations_from_db
 from src.Frontend.windows.aggregatedResultsWindow import AggregatedResultsWindow
+from src.Frontend.windows.simulationGeneratorWindow import SimulationGeneratorWindow
 from src.Frontend.windows.visualizationWindow import VisualizationWindow
 
 
@@ -110,10 +111,12 @@ class SimulationsWindow(tk.Toplevel):
         button_frame.grid(row=4, column=0, pady=10, sticky="ew")
         button_frame.columnconfigure(tuple(range(4)), weight=1)  # Distribute buttons evenly
 
-        self.delete_simulation_button = ttk.Button(
-            button_frame, text="Szimuláció törlése", command=self.delete_selected_simulation
+        self.generate_simulations_button = ttk.Button(
+            button_frame,
+            text="Szimulációk generálása",
+            command=self.open_simulation_generator
         )
-        self.delete_simulation_button.grid(row=0, column=0, padx=5, sticky="e")
+        self.generate_simulations_button.grid(row=0, column=0, padx=5, sticky="e")
 
         # Új gomb: Összesített szimulációs eredmények
         self.overall_results_button = ttk.Button(
@@ -193,22 +196,9 @@ class SimulationsWindow(tk.Toplevel):
                             simulation_name=simulation_name,
                             simulation_date=simulation_date, match_group_id=sim_id)
 
-    def delete_selected_simulation(self):
-        selected_item = self.simulation_treeview.selection()
-        if not selected_item:
-            messagebox.showwarning("Figyelmeztetés", "Nem választottál ki törlendő szimulációt.")
-            return
-
-        sim_id = int(self.simulation_treeview.item(selected_item[0], "values")[0])
-        # Adatbázisból törlő függvényt itt hívd meg!
-
-        self.load_simulations()
-        self.fixture_treeview.delete(*self.fixture_treeview.get_children())
-        messagebox.showinfo("Siker", f"Szimuláció ID: {sim_id} törölve.")
-
-        if self.refresh_callback:
-            self.refresh_callback()
-
     def show_aggregated_results(self):
         # Létrehozzuk az új ablakot, ami MINDENT megmutat egy helyen
         AggregatedResultsWindow(self)
+
+    def open_simulation_generator(self):
+        SimulationGeneratorWindow(self)

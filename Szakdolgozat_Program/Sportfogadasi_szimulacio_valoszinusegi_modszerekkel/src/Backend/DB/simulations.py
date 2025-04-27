@@ -128,9 +128,11 @@ def create_simulation(match_group_id, strategy_id):
             INSERT INTO simulations (
                 match_group_id, strategy_id, total_profit_loss, simulation_date,
                 bayes_classic_profit, monte_carlo_profit, poisson_profit,
-                bayes_empirical_profit, log_reg_profit, elo_profit
+                bayes_empirical_profit, log_reg_profit, elo_profit,
+                bayes_classic_stake, monte_carlo_stake, poisson_stake,
+                bayes_empirical_stake, log_reg_stake, elo_stake
             )
-            VALUES (%s, %s, 0, NOW(), 0, 0, 0, 0, 0, 0)
+            VALUES (%s, %s, 0, NOW(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         """, (match_group_id, strategy_id))
 
         simulation_id = cursor.lastrowid
@@ -161,17 +163,23 @@ def load_aggregated_simulations():
 
     try:
         sql = """
-        SELECT s.id AS id,
-               mg.name AS sim_name,
-               s.strategy_id,
-               s.total_profit_loss,
-               s.simulation_date,
-               s.bayes_classic_profit,
-               s.monte_carlo_profit,
-               s.poisson_profit,
-               s.bayes_empirical_profit,
-               s.log_reg_profit,
-               s.elo_profit
+       SELECT s.id AS id,
+           mg.name AS sim_name,
+           s.strategy_id,
+           s.total_profit_loss,
+           s.simulation_date,
+           s.bayes_classic_profit,
+           s.monte_carlo_profit,
+           s.poisson_profit,
+           s.bayes_empirical_profit,
+           s.log_reg_profit,
+           s.elo_profit,
+           s.bayes_classic_stake,
+           s.monte_carlo_stake,
+           s.poisson_stake,
+           s.bayes_empirical_stake,
+           s.log_reg_stake,
+           s.elo_stake
         FROM simulations s
         JOIN match_groups mg ON s.match_group_id = mg.id
         WHERE NOT EXISTS (
@@ -196,7 +204,10 @@ def load_aggregated_simulations():
     return results
 
 def load_simulation_profits_data(strategy_id=None):
-    """Betölti a szimulációs profit adatokat az adatbázisból, csak a lezárult fogadásokra (total_profit_loss != 0)."""
+    """
+    Betölti a szimulációs profit és stake adatokat az adatbázisból,
+    csak a lezárult fogadásokra (total_profit_loss != 0).
+    """
     connection = get_db_connection()
     cursor = connection.cursor()
 
@@ -207,6 +218,8 @@ def load_simulation_profits_data(strategy_id=None):
                     s.id, s.strategy_id, 
                     s.bayes_classic_profit, s.monte_carlo_profit, s.poisson_profit,
                     s.bayes_empirical_profit, s.log_reg_profit, s.elo_profit,
+                    s.bayes_classic_stake, s.monte_carlo_stake, s.poisson_stake,
+                    s.bayes_empirical_stake, s.log_reg_stake, s.elo_stake,
                     st.strategy_name
                 FROM simulations s
                 JOIN strategies st ON s.strategy_id = st.id
@@ -218,6 +231,8 @@ def load_simulation_profits_data(strategy_id=None):
                     s.id, s.strategy_id, 
                     s.bayes_classic_profit, s.monte_carlo_profit, s.poisson_profit,
                     s.bayes_empirical_profit, s.log_reg_profit, s.elo_profit,
+                    s.bayes_classic_stake, s.monte_carlo_stake, s.poisson_stake,
+                    s.bayes_empirical_stake, s.log_reg_stake, s.elo_stake,
                     st.strategy_name
                 FROM simulations s
                 JOIN strategies st ON s.strategy_id = st.id
@@ -237,7 +252,13 @@ def load_simulation_profits_data(strategy_id=None):
                 'bayes_empirical_profit': row[5],
                 'log_reg_profit': row[6],
                 'elo_profit': row[7],
-                'strategy_name': row[8]
+                'bayes_classic_stake': row[8],
+                'monte_carlo_stake': row[9],
+                'poisson_stake': row[10],
+                'bayes_empirical_stake': row[11],
+                'log_reg_stake': row[12],
+                'elo_stake': row[13],
+                'strategy_name': row[14]
             })
 
         return simulation_data
@@ -248,6 +269,7 @@ def load_simulation_profits_data(strategy_id=None):
     finally:
         cursor.close()
         connection.close()
+
 
 
 

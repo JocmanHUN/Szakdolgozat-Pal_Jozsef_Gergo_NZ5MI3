@@ -141,9 +141,9 @@ class SelectedFixturesWindow(tk.Toplevel):
         print(f"🔄 Adatok biztosítása a szimulációhoz: {match_group_name}")
         valid_fixture_ids = ensure_simulation_data_available(fixture_list)
 
-        if len(valid_fixture_ids) < 3:
-            print("⛔ Nem elegendő felhasználható mérkőzés (minimum 3 kell).")
-            messagebox.showerror("Hiba", "Legalább 3 valid meccs szükséges a szimulációhoz.",parent=self)
+        if len(valid_fixture_ids) < 5:
+            print("⛔ Nem elegendő felhasználható mérkőzés (minimum 5 kell).")
+            messagebox.showerror("Hiba", "Legalább 5 valid meccs szükséges a szimulációhoz.",parent=self)
             return
 
         # Csak a valid fixture-eket mentjük el

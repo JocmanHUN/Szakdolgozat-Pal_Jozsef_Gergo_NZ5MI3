@@ -159,14 +159,16 @@ def update_strategy_profit(sim_id, completed_fixtures):
         completed_fixtures.sort(key=lambda x: x.get("match_date"))
         strategies = ["1", "2", "3", "4", "5"]
         base_stake = 10.0
-        initial_bankroll = 10  # Kezdeti bankroll
+        initial_bankroll = 10
 
         for strategy_id in strategies:
             strategy_profit = 0.0
-            model_profits = [0.0] * 6  # Lista az egyes modellek profitjának tárolására
+            model_profits = [0.0] * 6
+            model_stakes = [0.0] * 6
 
             for model_id in range(1, 7):
                 model_profit = 0.0
+                model_stake = 0.0
                 stake = base_stake
                 fib_seq = [1, 1, 2, 3, 5, 8, 13, 21, 34]
                 fib_index = 0
@@ -195,25 +197,29 @@ def update_strategy_profit(sim_id, completed_fixtures):
                     if not odds or odds <= 1.01:
                         continue
 
-                    result = "✅ Győztes tipp" if was_correct else "❌ Vesztes tipp"
-
-                    if strategy_id == "1":  # Flat
+                    if strategy_id == "1":  # Flat Betting
                         match_profit = stake * (odds - 1) if was_correct else -stake
                         model_profit += match_profit
+                        model_stake += stake
 
-                    elif strategy_id == "2":  # Value
+                    elif strategy_id == "2":  # Value Betting
                         db_prediction = get_prediction_by_model_id(fixture_id, model_id, sim_id)
+                        if not db_prediction:
+                            continue
                         model_prob = float(str(db_prediction["probability"]).replace(",", ".")) / 100
                         if (model_prob * odds) > 1:
                             match_profit = stake * (odds - 1) if was_correct else -stake
                             model_profit += match_profit
+                            model_stake += stake
 
                     elif strategy_id == "3":  # Martingale
                         if was_correct:
                             model_profit += stake * (odds - 1)
+                            model_stake += stake
                             stake = base_stake
                         else:
                             model_profit -= stake
+                            model_stake += stake
                             stake *= 2
 
                     elif strategy_id == "4":  # Fibonacci
@@ -225,6 +231,7 @@ def update_strategy_profit(sim_id, completed_fixtures):
                             model_profit -= current_stake
                             fib_index = min(len(fib_seq) - 1, fib_index + 1)
                         stake = base_stake * fib_seq[fib_index]
+                        model_stake += current_stake
 
                     elif strategy_id == "5":  # Kelly
                         db_prediction = get_prediction_by_model_id(fixture_id, model_id, sim_id)
@@ -240,12 +247,14 @@ def update_strategy_profit(sim_id, completed_fixtures):
                             bankroll += current_stake * b
                         else:
                             bankroll -= current_stake
+                        model_stake += current_stake
                         model_profit = bankroll - initial_bankroll
 
                 strategy_profit += model_profit
-                model_profits[model_id - 1] = model_profit  # mentés a listába
+                model_profits[model_id - 1] = model_profit
+                model_stakes[model_id - 1] = model_stake
 
-            # Frissítés az adatbázisban
+            # Mentés az adatbázisba
             cursor.execute("""
                 UPDATE simulations
                 SET total_profit_loss = %s,
@@ -254,21 +263,24 @@ def update_strategy_profit(sim_id, completed_fixtures):
                     poisson_profit = %s,
                     bayes_empirical_profit = %s,
                     log_reg_profit = %s,
-                    elo_profit = %s
+                    elo_profit = %s,
+                    bayes_classic_stake = %s,
+                    monte_carlo_stake = %s,
+                    poisson_stake = %s,
+                    bayes_empirical_stake = %s,
+                    log_reg_stake = %s,
+                    elo_stake = %s
                 WHERE match_group_id = %s AND strategy_id = %s
             """, (
                 strategy_profit,
-                model_profits[0],
-                model_profits[1],
-                model_profits[2],
-                model_profits[3],
-                model_profits[4],
-                model_profits[5],
-                sim_id,
-                strategy_id
+                model_profits[0], model_profits[1], model_profits[2],
+                model_profits[3], model_profits[4], model_profits[5],
+                model_stakes[0], model_stakes[1], model_stakes[2],
+                model_stakes[3], model_stakes[4], model_stakes[5],
+                sim_id, strategy_id
             ))
             connection.commit()
-            print(f"✅ Stratégia {strategy_id} profitjai elmentve.")
+            print(f"✅ Stratégia {strategy_id} profitjai és tétei elmentve.")
 
     except Exception as e:
         print(f"❌ Hiba történt az update_strategy_profit során: {e}")
@@ -392,5 +404,152 @@ def get_prediction_by_model_id(fixture_id: int, model_id: int, match_group_id: i
         connection.close()
 
 
+def get_models_odds_statistics():
+    """
+    Lekérdezi az egyes modellek odds statisztikáit:
+    - átlagos odds értékek modellenként
+    - győztes tippek átlagos odds értékei
+    - vesztes tippek átlagos odds értékei
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz (get_models_odds_statistics).")
+        return {}
 
+    cursor = connection.cursor(dictionary=True)
+    try:
+        # Átlagos odds értékek lekérdezése modellenként, győztes/vesztes bontásban
+        query = """
+            SELECT 
+                mp.model_id,
+                mp.was_correct,
+                AVG(CASE 
+                    WHEN mp.predicted_outcome = '1' THEN o.home_odds
+                    WHEN mp.predicted_outcome = 'X' THEN o.draw_odds
+                    WHEN mp.predicted_outcome = '2' THEN o.away_odds
+                    ELSE NULL
+                END) AS average_odds
+            FROM model_predictions mp
+            JOIN fixtures f ON mp.fixture_id = f.id
+            JOIN odds o ON f.id = o.fixture_id
+            WHERE mp.was_correct IS NOT NULL
+            GROUP BY mp.model_id, mp.was_correct
+        """
+        cursor.execute(query)
+        results = cursor.fetchall()
+
+        # Rendezzük át az eredményt használhatóbb formátumba
+        odds_stats = {}
+        for item in results:
+            model_id = item['model_id']
+            if model_id not in odds_stats:
+                odds_stats[model_id] = {
+                    'win_odds_avg': 0.0,
+                    'loss_odds_avg': 0.0,
+                    'total_odds_avg': 0.0
+                }
+
+            # Győztes vagy vesztes tipp
+            if item['was_correct'] == 1:
+                odds_stats[model_id]['win_odds_avg'] = round(float(item['average_odds']), 2)
+            else:
+                odds_stats[model_id]['loss_odds_avg'] = round(float(item['average_odds']), 2)
+
+        # Teljes átlagos odds lekérdezése modellenként
+        total_query = """
+            SELECT 
+                mp.model_id,
+                AVG(CASE 
+                    WHEN mp.predicted_outcome = '1' THEN o.home_odds
+                    WHEN mp.predicted_outcome = 'X' THEN o.draw_odds
+                    WHEN mp.predicted_outcome = '2' THEN o.away_odds
+                    ELSE NULL
+                END) AS average_odds
+            FROM model_predictions mp
+            JOIN fixtures f ON mp.fixture_id = f.id
+            JOIN odds o ON f.id = o.fixture_id
+            WHERE mp.was_correct IS NOT NULL
+            GROUP BY mp.model_id
+        """
+        cursor.execute(total_query)
+        total_results = cursor.fetchall()
+
+        for item in total_results:
+            model_id = item['model_id']
+            if model_id in odds_stats:
+                odds_stats[model_id]['total_odds_avg'] = round(float(item['average_odds']), 2)
+
+        return odds_stats
+
+    except Exception as e:
+        print(f"❌ Hiba történt a get_models_odds_statistics során: {e}")
+        return {}
+
+    finally:
+        cursor.close()
+        connection.close()
+
+def batch_evaluate_all_predictions():
+    """Kiértékeli az összes olyan predikciót, ahol még nincs beállítva a was_correct."""
+    connection = get_db_connection()
+    if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz (batch_evaluate_all_predictions).")
+        return
+
+    cursor = connection.cursor(dictionary=True)
+
+    try:
+        # 🔎 Lekérjük az összes szükséges adatot egyszerre
+        query = """
+            SELECT mp.id AS prediction_id, mp.fixture_id, mp.predicted_outcome, 
+                   f.score_home, f.score_away
+            FROM model_predictions mp
+            JOIN fixtures f ON mp.fixture_id = f.id
+            WHERE mp.was_correct IS NULL
+              AND f.status IN ('FT', 'AET', 'PEN')
+              AND f.score_home IS NOT NULL
+              AND f.score_away IS NOT NULL
+        """
+        cursor.execute(query)
+        rows = cursor.fetchall()
+
+        if not rows:
+            print("✅ Nincs kiértékeletlen predikció.")
+            return
+
+        updates = []
+        for row in rows:
+            prediction_id = row["prediction_id"]
+            predicted_outcome = row["predicted_outcome"]
+            home_score = row["score_home"]
+            away_score = row["score_away"]
+
+            if home_score > away_score:
+                actual_outcome = "1"
+            elif home_score < away_score:
+                actual_outcome = "2"
+            else:
+                actual_outcome = "X"
+
+            was_correct = int(predicted_outcome == actual_outcome)
+            updates.append((was_correct, prediction_id))
+
+        # 🔄 Frissítjük az adatbázist egyszerre
+        update_query = """
+            UPDATE model_predictions
+            SET was_correct = %s
+            WHERE id = %s
+        """
+        cursor.executemany(update_query, updates)
+        connection.commit()
+
+        print(f"✅ Összesen {len(updates)} predikció frissítve batch módban.")
+
+    except Exception as e:
+        print(f"❌ Hiba történt a batch_evaluate_all_predictions során: {e}")
+        connection.rollback()
+
+    finally:
+        cursor.close()
+        connection.close()
 

@@ -163,14 +163,18 @@ def ensure_simulation_data_available(fixture_list, num_matches=15):
                     for bet in bookmaker.get("bookmakers", []):
                         for bet_option in bet.get("bets", []):
                             if bet_option.get("name") == "Match Winner":
-                                processed_odds.append({
-                                    "fixture_id": fixture_id,
-                                    "bookmaker_id": bet["id"],
-                                    "home_odds": bet_option["values"][0]["odd"],
-                                    "draw_odds": bet_option["values"][1]["odd"],
-                                    "away_odds": bet_option["values"][2]["odd"],
-                                    "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                })
+                                try:
+                                    processed_odds.append({
+                                        "fixture_id": fixture_id,
+                                        "bookmaker_id": bet["id"],
+                                        "home_odds": bet_option["values"][0]["odd"],
+                                        "draw_odds": bet_option["values"][1]["odd"],
+                                        "away_odds": bet_option["values"][2]["odd"],
+                                        "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                    })
+                                except (IndexError, KeyError):
+                                    print(f"⚠️ Hiányos odds adatok a következő fogadóirodánál: {bet['id']}")
+                                    continue
 
                 if processed_odds:
                     write_to_odds(processed_odds)  # Oddsok mentése

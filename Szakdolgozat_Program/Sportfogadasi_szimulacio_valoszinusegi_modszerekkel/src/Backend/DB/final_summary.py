@@ -83,3 +83,132 @@ def fetch_completed_summary():
     return results
 
 
+def get_odds_stats_by_strategy_and_model():
+    """
+    Lekérdezi az odds statisztikákat stratégia és modell szerint bontva.
+    Visszatér egy szótárral, ahol a kulcsok a stratégia azonosítók, az értékek pedig
+    modell azonosítókat és odds statisztikákat tartalmazó szótárak.
+    """
+    connection = get_db_connection()
+    if connection is None:
+        print("❌ Nem sikerült csatlakozni az adatbázishoz (get_odds_stats_by_strategy_and_model).")
+        return {}
+
+    cursor = connection.cursor(dictionary=True)
+    try:
+        # Győztes tippek átlagos odds értékei modellenként és stratégiánként
+        win_query = """
+            SELECT 
+                s.strategy_id,
+                mp.model_id,
+                AVG(CASE 
+                    WHEN mp.predicted_outcome = '1' THEN o.home_odds
+                    WHEN mp.predicted_outcome = 'X' THEN o.draw_odds
+                    WHEN mp.predicted_outcome = '2' THEN o.away_odds
+                    ELSE NULL
+                END) AS average_odds
+            FROM model_predictions mp
+            JOIN fixtures f ON mp.fixture_id = f.id
+            JOIN odds o ON f.id = o.fixture_id
+            JOIN simulations s ON mp.match_group_id = s.match_group_id
+            WHERE mp.was_correct = 1
+            GROUP BY s.strategy_id, mp.model_id
+        """
+        cursor.execute(win_query)
+        win_results = cursor.fetchall()
+
+        # Vesztes tippek átlagos odds értékei modellenként és stratégiánként
+        loss_query = """
+            SELECT 
+                s.strategy_id,
+                mp.model_id,
+                AVG(CASE 
+                    WHEN mp.predicted_outcome = '1' THEN o.home_odds
+                    WHEN mp.predicted_outcome = 'X' THEN o.draw_odds
+                    WHEN mp.predicted_outcome = '2' THEN o.away_odds
+                    ELSE NULL
+                END) AS average_odds
+            FROM model_predictions mp
+            JOIN fixtures f ON mp.fixture_id = f.id
+            JOIN odds o ON f.id = o.fixture_id
+            JOIN simulations s ON mp.match_group_id = s.match_group_id
+            WHERE mp.was_correct = 0
+            GROUP BY s.strategy_id, mp.model_id
+        """
+        cursor.execute(loss_query)
+        loss_results = cursor.fetchall()
+
+        # Összes tipp átlagos odds értékei modellenként és stratégiánként
+        total_query = """
+            SELECT 
+                s.strategy_id,
+                mp.model_id,
+                AVG(CASE 
+                    WHEN mp.predicted_outcome = '1' THEN o.home_odds
+                    WHEN mp.predicted_outcome = 'X' THEN o.draw_odds
+                    WHEN mp.predicted_outcome = '2' THEN o.away_odds
+                    ELSE NULL
+                END) AS average_odds
+            FROM model_predictions mp
+            JOIN fixtures f ON mp.fixture_id = f.id
+            JOIN odds o ON f.id = o.fixture_id
+            JOIN simulations s ON mp.match_group_id = s.match_group_id
+            GROUP BY s.strategy_id, mp.model_id
+        """
+        cursor.execute(total_query)
+        total_results = cursor.fetchall()
+
+        # Rendezzük át az eredményt használhatóbb formátumba
+        odds_stats = {}
+
+        # Inicializáljuk a stratégia-modell struktúrát
+        for win_item in win_results:
+            strategy_id = win_item['strategy_id']
+            model_id = win_item['model_id']
+            if strategy_id not in odds_stats:
+                odds_stats[strategy_id] = {}
+            if model_id not in odds_stats[strategy_id]:
+                odds_stats[strategy_id][model_id] = {
+                    'win_odds_avg': 0.0,
+                    'loss_odds_avg': 0.0,
+                    'total_odds_avg': 0.0
+                }
+            odds_stats[strategy_id][model_id]['win_odds_avg'] = round(float(win_item['average_odds']), 2)
+
+        # Hozzáadjuk a vesztes tippek átlagos odds értékeit
+        for loss_item in loss_results:
+            strategy_id = loss_item['strategy_id']
+            model_id = loss_item['model_id']
+            if strategy_id not in odds_stats:
+                odds_stats[strategy_id] = {}
+            if model_id not in odds_stats[strategy_id]:
+                odds_stats[strategy_id][model_id] = {
+                    'win_odds_avg': 0.0,
+                    'loss_odds_avg': 0.0,
+                    'total_odds_avg': 0.0
+                }
+            odds_stats[strategy_id][model_id]['loss_odds_avg'] = round(float(loss_item['average_odds']), 2)
+
+        # Hozzáadjuk az összes tipp átlagos odds értékeit
+        for total_item in total_results:
+            strategy_id = total_item['strategy_id']
+            model_id = total_item['model_id']
+            if strategy_id not in odds_stats:
+                odds_stats[strategy_id] = {}
+            if model_id not in odds_stats[strategy_id]:
+                odds_stats[strategy_id][model_id] = {
+                    'win_odds_avg': 0.0,
+                    'loss_odds_avg': 0.0,
+                    'total_odds_avg': 0.0
+                }
+            odds_stats[strategy_id][model_id]['total_odds_avg'] = round(float(total_item['average_odds']), 2)
+
+        return odds_stats
+
+    except Exception as e:
+        print(f"❌ Hiba történt a get_odds_stats_by_strategy_and_model során: {e}")
+        return {}
+
+    finally:
+        cursor.close()
+        connection.close()

@@ -4,6 +4,6 @@ HOST = 'v3.football.api-sports.io'
 DB_CONFIG = {
     'user': 'root',      # MySQL felhasználónév
     'password': '',  # MySQL jelszó
-    'host': 'localhost',          # Ha távolról csatlakozol, akkor a szerver IP címe
+    'host': '127.0.0.1',          # Ha távolról csatlakozol, akkor a szerver IP címe
     'database': 'sports_database' # Az adatbázis neve
 }

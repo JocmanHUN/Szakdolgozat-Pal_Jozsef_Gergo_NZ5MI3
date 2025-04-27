@@ -7,8 +7,8 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import seaborn as sns
-from src.Backend.DB.final_summary import fetch_completed_summary
-from src.Backend.DB.predictions import get_all_predictions, get_all_models
+from src.Backend.DB.final_summary import fetch_completed_summary, get_odds_stats_by_strategy_and_model
+from src.Backend.DB.predictions import get_all_predictions, get_all_models, get_models_odds_statistics
 from src.Backend.DB.simulations import load_aggregated_simulations, load_simulation_profits_data
 from src.Backend.DB.strategies import get_all_strategies
 
@@ -895,11 +895,14 @@ class AggregatedResultsWindow(tk.Toplevel):
     def update_prediction_stats(self, model_id):
         """
         Frissíti a predikciós statisztikákat a kiválasztott modell alapján,
-        most már a valószínűségi statisztikákkal együtt.
+        most már a valószínűségi és odds statisztikákkal együtt.
         """
         # Mindig friss adatokkal dolgozunk
         self.prediction_data = get_all_predictions() or []
         self.pred_model_counts, self.pred_model_stats = self.get_prediction_stats()
+
+        # Odds statisztikák lekérdezése
+        self.odds_stats = get_models_odds_statistics()
 
         total = len(self.prediction_data)
         correct = sum(1 for p in self.prediction_data if p.get("was_correct", 0) == 1)
@@ -942,6 +945,18 @@ class AggregatedResultsWindow(tk.Toplevel):
             else:
                 loss_avg = loss_std = loss_median = max_loss_prob = min_loss_prob = 0
 
+            # Összesített odds statisztikák
+            all_win_odds = [stats.get('win_odds_avg', 0) for stats in self.odds_stats.values() if
+                            stats.get('win_odds_avg', 0) > 0]
+            all_loss_odds = [stats.get('loss_odds_avg', 0) for stats in self.odds_stats.values() if
+                             stats.get('loss_odds_avg', 0) > 0]
+            all_total_odds = [stats.get('total_odds_avg', 0) for stats in self.odds_stats.values() if
+                              stats.get('total_odds_avg', 0) > 0]
+
+            win_odds_avg = statistics.mean(all_win_odds) if all_win_odds else 0
+            loss_odds_avg = statistics.mean(all_loss_odds) if all_loss_odds else 0
+            total_odds_avg = statistics.mean(all_total_odds) if all_total_odds else 0
+
             # További statisztikák megjelenítése
             additional_stats = (
                 f"\nTalálati arány: {accuracy:.1f}%\n"
@@ -950,7 +965,11 @@ class AggregatedResultsWindow(tk.Toplevel):
                 f"Legnagyobb valószínűségű vesztes tipp: {max_loss_prob:.2f}\n"
                 f"Legkisebb valószínűségű vesztes tipp: {min_loss_prob:.2f}\n"
                 f"Győztes tippek valószínűsége - Átlag: {win_avg:.2f}, Szórás: {win_std:.2f}, Medián: {win_median:.2f}\n"
-                f"Vesztes tippek valószínűsége - Átlag: {loss_avg:.2f}, Szórás: {loss_std:.2f}, Medián: {loss_median:.2f}"
+                f"Vesztes tippek valószínűsége - Átlag: {loss_avg:.2f}, Szórás: {loss_std:.2f}, Medián: {loss_median:.2f}\n"
+                f"\nOdds statisztikák:\n"
+                f"Átlagos odds: {total_odds_avg:.2f}\n"
+                f"Győztes tippek átlagos odds: {win_odds_avg:.2f}\n"
+                f"Vesztes tippek átlagos odds: {loss_odds_avg:.2f}"
             )
 
         else:
@@ -967,6 +986,13 @@ class AggregatedResultsWindow(tk.Toplevel):
 
             # Modellspecifikus valószínűségi statisztikák
             model_stats = self.pred_model_stats.get(model_id, {})
+
+            # Modellspecifikus odds statisztikák
+            odds_data = self.odds_stats.get(model_id, {})
+            win_odds_avg = odds_data.get('win_odds_avg', 0)
+            loss_odds_avg = odds_data.get('loss_odds_avg', 0)
+            total_odds_avg = odds_data.get('total_odds_avg', 0)
+
             additional_stats = (
                 f"\nTalálati arány: {model_accuracy:.1f}%\n"
                 f"Legnagyobb valószínűségű győztes tipp: {model_stats.get('max_win_prob', 0):.2f}\n"
@@ -976,7 +1002,11 @@ class AggregatedResultsWindow(tk.Toplevel):
                 f"Győztes tippek valószínűsége - Átlag: {model_stats.get('win_prob_avg', 0):.2f}, "
                 f"Szórás: {model_stats.get('win_prob_std', 0):.2f}, Medián: {model_stats.get('win_prob_median', 0):.2f}\n"
                 f"Vesztes tippek valószínűsége - Átlag: {model_stats.get('loss_prob_avg', 0):.2f}, "
-                f"Szórás: {model_stats.get('loss_prob_std', 0):.2f}, Medián: {model_stats.get('loss_prob_median', 0):.2f}"
+                f"Szórás: {model_stats.get('loss_prob_std', 0):.2f}, Medián: {model_stats.get('loss_prob_median', 0):.2f}\n"
+                f"\nOdds statisztikák:\n"
+                f"Átlagos odds: {total_odds_avg:.2f}\n"
+                f"Győztes tippek átlagos odds: {win_odds_avg:.2f}\n"
+                f"Vesztes tippek átlagos odds: {loss_odds_avg:.2f}"
             )
 
         # További statisztikák megjelenítése
@@ -1246,19 +1276,19 @@ class AggregatedResultsWindow(tk.Toplevel):
 
     def create_comparison_table(self):
         """Létrehozza a statisztikai táblázatot"""
-        # Treeview létrehozása
         columns = (
-            "model", "avg_profit", "profitable_pct", "max_profit", "min_profit",
+            "model", "avg_profit", "avg_profit_pct", "profitable_pct", "max_profit", "min_profit",
             "median_profit", "profit_std", "max_loss", "median_loss",
-            "loss_std", "median_win", "max_win", "min_win"
+            "loss_std", "median_win", "max_win", "min_win",
+            "avg_odds", "win_odds_avg", "loss_odds_avg"
         )
 
         self.model_comparison_tree = ttk.Treeview(self.stats_frame, columns=columns, show="headings")
 
-        # Oszlopok beállítása
         self.model_comparison_tree.heading("model", text="Modell")
-        self.model_comparison_tree.heading("profitable_pct", text="Sikeresség %")
         self.model_comparison_tree.heading("avg_profit", text="Átlagos profit")
+        self.model_comparison_tree.heading("avg_profit_pct", text="Átlag profit %")
+        self.model_comparison_tree.heading("profitable_pct", text="Sikeresség %")
         self.model_comparison_tree.heading("max_profit", text="Max Profit")
         self.model_comparison_tree.heading("min_profit", text="Min Profit")
         self.model_comparison_tree.heading("median_profit", text="Profit Medián")
@@ -1269,29 +1299,29 @@ class AggregatedResultsWindow(tk.Toplevel):
         self.model_comparison_tree.heading("median_win", text="Nyer. Medián")
         self.model_comparison_tree.heading("max_win", text="Max Nyereség")
         self.model_comparison_tree.heading("min_win", text="Min Nyereség")
+        self.model_comparison_tree.heading("avg_odds", text="Átl. Odds")
+        self.model_comparison_tree.heading("win_odds_avg", text="Nyer. Odds Átl.")
+        self.model_comparison_tree.heading("loss_odds_avg", text="Vesz. Odds Átl.")
 
-        # Oszlop szélességek
         col_widths = {
-            "model": 120, "avg_profit": 100, "profitable_pct": 80, "max_profit": 90,
+            "model": 120, "avg_profit": 100, "avg_profit_pct": 110, "profitable_pct": 90, "max_profit": 90,
             "min_profit": 90, "median_profit": 100, "profit_std": 90,
             "max_loss": 100, "median_loss": 90, "loss_std": 90,
-            "median_win": 90, "max_win": 90, "min_win": 90
+            "median_win": 90, "max_win": 90, "min_win": 90,
+            "avg_odds": 80, "win_odds_avg": 90, "loss_odds_avg": 90
         }
 
         for col, width in col_widths.items():
             self.model_comparison_tree.column(col, width=width, anchor="center")
 
-        # Scrollbarok
         vsb = ttk.Scrollbar(self.stats_frame, orient="vertical", command=self.model_comparison_tree.yview)
         hsb = ttk.Scrollbar(self.stats_frame, orient="horizontal", command=self.model_comparison_tree.xview)
         self.model_comparison_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        # Grid elrendezés
         self.model_comparison_tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
-        # Reszponzív méretezés
         self.stats_frame.rowconfigure(0, weight=1)
         self.stats_frame.columnconfigure(0, weight=1)
 
@@ -1331,44 +1361,84 @@ class AggregatedResultsWindow(tk.Toplevel):
 
     def update_stats_table_comparison(self, data, strategy_name):
         """Frissíti a statisztikai táblázatot"""
-        # Táblázat ürítése
         for item in self.model_comparison_tree.get_children():
             self.model_comparison_tree.delete(item)
 
-        # Minden modell statisztikáinak kiszámítása
+        if strategy_name == "Összes stratégia":
+            models_odds = get_models_odds_statistics()
+            self.odds_stats_all = models_odds
+        else:
+            self.odds_stats_by_strategy = get_odds_stats_by_strategy_and_model()
+
+        current_strategy_id = next(
+            (s['id'] for s in self.strategies if s['strategy_name'] == strategy_name),
+            None
+        )
+
         for model in self.models:
             model_name = self.model_names_comparison.get(model, model)
 
-            # Modell adatok kinyerése
-            model_profits = [s.get(model, 0) for s in data]
+            model_id_map = {
+                "bayes_classic_profit": 1,
+                "monte_carlo_profit": 2,
+                "poisson_profit": 3,
+                "bayes_empirical_profit": 4,
+                "log_reg_profit": 5,
+                "elo_profit": 6
+            }
+            model_id = model_id_map.get(model)
 
-            # Általános statisztikák
+            model_profits = [s.get(model, 0) for s in data]
+            model_stakes_key = model.replace("profit", "stake")
+            model_stakes = [s.get(model_stakes_key, 0) for s in data]
+
             total_sims = len(model_profits)
             profitable_sims = sum(1 for p in model_profits if p > 0)
             profitable_pct = (profitable_sims / total_sims * 100) if total_sims > 0 else 0
 
             max_profit = max(model_profits) if model_profits else 0
             min_profit = min(model_profits) if model_profits else 0
-            print(f"[DEBUG] {model_name} profits: {model_profits}")
             median_profit = statistics.median(model_profits) if model_profits else 0
             profit_std = statistics.stdev(model_profits) if len(model_profits) > 1 else 0
             avg_profit = statistics.mean(model_profits) if model_profits else 0
-            # Veszteségek (csak negatív értékek)
+
+            avg_stake = statistics.mean(model_stakes) if any(model_stakes) else 0
+            avg_profit_pct = (avg_profit / avg_stake * 100) if avg_stake > 0 else 0
+
             losses = [abs(p) for p in model_profits if p < 0]
             max_loss = max(losses) if losses else 0
             median_loss = statistics.median(losses) if losses else 0
             loss_std = statistics.stdev(losses) if len(losses) > 1 else 0
 
-            # Nyereségek (csak pozitív értékek)
             wins = [p for p in model_profits if p > 0]
             median_win = statistics.median(wins) if wins else 0
             max_win = max(wins) if wins else 0
             min_win = min(wins) if wins else 0
 
-            # Sor hozzáadása a táblázathoz
+            avg_odds = "-"
+            win_odds_avg = "-"
+            loss_odds_avg = "-"
+
+            if strategy_name == "Összes stratégia" and hasattr(self, 'odds_stats_all'):
+                if model_id in self.odds_stats_all:
+                    odds_data = self.odds_stats_all[model_id]
+                    avg_odds = f"{odds_data.get('total_odds_avg', 0):.2f}" if odds_data.get('total_odds_avg') else "-"
+                    win_odds_avg = f"{odds_data.get('win_odds_avg', 0):.2f}" if odds_data.get('win_odds_avg') else "-"
+                    loss_odds_avg = f"{odds_data.get('loss_odds_avg', 0):.2f}" if odds_data.get(
+                        'loss_odds_avg') else "-"
+            elif current_strategy_id and hasattr(self,
+                                                 'odds_stats_by_strategy') and current_strategy_id in self.odds_stats_by_strategy:
+                if model_id in self.odds_stats_by_strategy[current_strategy_id]:
+                    odds_data = self.odds_stats_by_strategy[current_strategy_id][model_id]
+                    avg_odds = f"{odds_data.get('total_odds_avg', 0):.2f}" if odds_data.get('total_odds_avg') else "-"
+                    win_odds_avg = f"{odds_data.get('win_odds_avg', 0):.2f}" if odds_data.get('win_odds_avg') else "-"
+                    loss_odds_avg = f"{odds_data.get('loss_odds_avg', 0):.2f}" if odds_data.get(
+                        'loss_odds_avg') else "-"
+
             self.model_comparison_tree.insert("", "end", values=(
                 model_name,
                 f"{avg_profit:.2f}",
+                f"{avg_profit_pct:.2f}%",
                 f"{profitable_pct:.1f}%",
                 f"{max_profit:.2f}",
                 f"{min_profit:.2f}",
@@ -1379,10 +1449,12 @@ class AggregatedResultsWindow(tk.Toplevel):
                 f"{loss_std:.2f}",
                 f"{median_win:.2f}",
                 f"{max_win:.2f}",
-                f"{min_win:.2f}"
+                f"{min_win:.2f}",
+                avg_odds,
+                win_odds_avg,
+                loss_odds_avg
             ))
 
-        # Cím frissítése
         self.model_comparison_tree.heading("model", text=f"Modell ({strategy_name})")
 
     def update_charts_comparison(self, data, strategy_name):
@@ -1399,8 +1471,8 @@ class AggregatedResultsWindow(tk.Toplevel):
             ).pack(pady=50)
             return
 
-        # 3 diagram létrehozása: boxplot, profit eloszlás, win/loss arány
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+        # 4 diagram létrehozása: boxplot, profit eloszlás, win/loss arány, odds összehasonlítás
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
         fig.suptitle(f"Modell teljesítmények - {strategy_name}", fontsize=14)
 
         # 1. Boxplot diagram
@@ -1411,6 +1483,9 @@ class AggregatedResultsWindow(tk.Toplevel):
 
         # 3. Win/Loss arány
         self.create_win_loss_ratio(ax3, data)
+
+        # 4. Odds összehasonlítás (új)
+        self.create_odds_comparison(ax4, strategy_name)
 
         plt.tight_layout()
 
@@ -1424,6 +1499,97 @@ class AggregatedResultsWindow(tk.Toplevel):
         toolbar.update()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
+    def create_odds_comparison(self, ax, strategy_name):
+        """Odds összehasonlítás diagram létrehozása modellek szerint"""
+        # Modell nevek és modellek ID-jei
+        model_id_map = {
+            1: "Bayes Klasszikus",
+            2: "Monte Carlo",
+            3: "Poisson",
+            4: "Bayes Empirikus",
+            5: "Logisztikus Regresszió",
+            6: "ELO"
+        }
+
+        # Odds statisztikák forrásának kiválasztása
+        if strategy_name == "Összes stratégia":
+            # Ha az összes stratégia van kiválasztva, akkor az általános statisztikákat használjuk
+            if not hasattr(self, 'odds_stats_all'):
+                self.odds_stats_all = get_models_odds_statistics()
+
+            if not self.odds_stats_all:
+                ax.text(0.5, 0.5, "Nincs elérhető odds adat",
+                        horizontalalignment='center', verticalalignment='center')
+                return
+
+            # Adatok előkészítése
+            model_ids = []
+            win_odds = []
+            loss_odds = []
+            total_odds = []
+            model_names = []
+
+            for model_id, model_name in model_id_map.items():
+                if model_id in self.odds_stats_all:
+                    odds_data = self.odds_stats_all[model_id]
+                    model_ids.append(model_id)
+                    model_names.append(model_name)
+                    win_odds.append(odds_data.get('win_odds_avg', 0))
+                    loss_odds.append(odds_data.get('loss_odds_avg', 0))
+                    total_odds.append(odds_data.get('total_odds_avg', 0))
+        else:
+            # Ha konkrét stratégia van kiválasztva, akkor a stratégia szerinti statisztikákat használjuk
+            current_strategy_id = next(
+                (s['id'] for s in self.strategies if s['strategy_name'] == strategy_name),
+                None
+            )
+
+            if not hasattr(self, 'odds_stats_by_strategy'):
+                self.odds_stats_by_strategy = get_odds_stats_by_strategy_and_model()
+
+            if not current_strategy_id or current_strategy_id not in self.odds_stats_by_strategy:
+                ax.text(0.5, 0.5, "Nincs elérhető odds adat",
+                        horizontalalignment='center', verticalalignment='center')
+                return
+
+            # Adatok előkészítése
+            model_ids = []
+            win_odds = []
+            loss_odds = []
+            total_odds = []
+            model_names = []
+
+            for model_id, odds_data in self.odds_stats_by_strategy[current_strategy_id].items():
+                if model_id in model_id_map:
+                    model_ids.append(model_id)
+                    model_names.append(model_id_map[model_id])
+                    win_odds.append(odds_data.get('win_odds_avg', 0))
+                    loss_odds.append(odds_data.get('loss_odds_avg', 0))
+                    total_odds.append(odds_data.get('total_odds_avg', 0))
+
+        if not model_ids:
+            ax.text(0.5, 0.5, "Nincs elérhető odds adat",
+                    horizontalalignment='center', verticalalignment='center')
+            return
+
+        # X tengely pozíciói
+        x = range(len(model_ids))
+        width = 0.25
+
+        # Oszlopdiagramok rajzolása
+        ax.bar([i - width for i in x], win_odds, width, label='Győztes tippek odds', color='green')
+        ax.bar(x, total_odds, width, label='Összes tipp odds', color='blue')
+        ax.bar([i + width for i in x], loss_odds, width, label='Vesztes tippek odds', color='red')
+
+        # Diagram formázása
+        ax.set_title(f"Odds összehasonlítás - {strategy_name}")
+        ax.set_ylabel("Átlagos odds")
+        ax.set_xticks(x)
+        ax.set_xticklabels(model_names)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+
     def create_boxplot_comparison(self, ax, data):
         """Boxplot diagram készítése a modellek profitjairól"""
         # Adatok előkészítése
@@ -1434,7 +1600,7 @@ class AggregatedResultsWindow(tk.Toplevel):
             model_profits = [s.get(model, 0) for s in data]
             if model_profits:
                 plot_data.append(model_profits)
-                labels.append(self.model_names_comparison.get(model, model))  # Itt javítva
+                labels.append(self.model_names_comparison.get(model, model))
 
         # Boxplot rajzolása
         ax.boxplot(plot_data, labels=labels, showmeans=True)
