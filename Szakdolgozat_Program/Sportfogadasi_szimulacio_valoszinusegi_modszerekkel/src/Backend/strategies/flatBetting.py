@@ -1,13 +1,33 @@
-def flat_betting(bets, stake, bankroll=1000):
-    bankrolls = [bankroll]
-    stakes_used = []
+def flat_betting(bets, stake, bankroll_start=None):
+    bankroll = [bankroll_start if bankroll_start is not None else 0]
+    stakes = []
+    tracking_bankroll = bankroll_start is not None
 
     for bet in bets:
-        stakes_used.append(stake)
+        current_bankroll = bankroll[-1]
 
-        if bet['won']:
-            bankrolls.append(bankrolls[-1] + stake * (bet['odds'] - 1))
+        if tracking_bankroll:
+            if current_bankroll <= 0:
+                stakes.append(0)
+                bankroll.append(current_bankroll)
+                continue
+            elif current_bankroll < stake:
+                actual_stake = current_bankroll  # Rakjuk fel a maradékot
+            else:
+                actual_stake = stake
         else:
-            bankrolls.append(bankrolls[-1] - stake)
+            actual_stake = stake
 
-    return bankrolls, stakes_used
+        win = bet['won']
+        odds = bet['odds']
+
+        stakes.append(actual_stake)
+
+        if win:
+            profit = actual_stake * (odds - 1)
+        else:
+            profit = -actual_stake
+
+        bankroll.append(current_bankroll + profit)
+
+    return bankroll, stakes

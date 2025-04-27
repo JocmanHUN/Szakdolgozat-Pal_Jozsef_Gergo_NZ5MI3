@@ -1,16 +1,37 @@
-def martingale(bets, base_stake):
-    bankroll = [1000]
-    stakes_used = []
+def martingale(bets, base_stake, bankroll_start=None):
+    bankroll = [bankroll_start if bankroll_start is not None else 0]
+    stakes = []
     current_stake = base_stake
 
+    tracking_bankroll = bankroll_start is not None and bankroll_start > 0
+
     for bet in bets:
-        stakes_used.append(current_stake)
+        current_bankroll = bankroll[-1]
 
-        if bet['won']:
-            bankroll.append(bankroll[-1] + current_stake * (bet['odds'] - 1))
-            current_stake = base_stake
+        if tracking_bankroll:
+            if current_bankroll <= 0:
+                stakes.append(0)
+                bankroll.append(current_bankroll)
+                continue
+            elif current_bankroll < current_stake:
+                actual_stake = current_bankroll  # Rakjuk fel a maradékot
+            else:
+                actual_stake = current_stake
         else:
-            bankroll.append(bankroll[-1] - current_stake)
-            current_stake *= 2
+            actual_stake = current_stake
 
-    return bankroll, stakes_used
+        win = bet['won']
+        odds = bet['odds']
+
+        stakes.append(actual_stake)
+
+        if win:
+            profit = actual_stake * (odds - 1)
+            current_stake = base_stake  # Ha nyertünk, vissza alap tétre
+        else:
+            profit = -actual_stake
+            current_stake *= 2  # Ha vesztettünk, duplázunk
+
+        bankroll.append(current_bankroll + profit)
+
+    return bankroll, stakes

@@ -1,19 +1,39 @@
-def value_betting(bets, stake):
-    bankroll = [1000]
-    stakes_used = []
+def value_betting(bets, stake, bankroll_start=None):
+    bankroll = [bankroll_start if bankroll_start is not None else 0]
+    stakes = []
+
+    tracking_bankroll = bankroll_start is not None and bankroll_start > 0
 
     for bet in bets:
-        model_prob = bet['model_probability']
-        bookmaker_prob = 1 / bet['odds']
+        current_bankroll = bankroll[-1]
 
-        if model_prob > bookmaker_prob:
-            stakes_used.append(stake)
-            if bet['won']:
-                bankroll.append(bankroll[-1] + stake * (bet['odds'] - 1))
+        if tracking_bankroll and current_bankroll <= 0:
+            stakes.append(0)
+            bankroll.append(current_bankroll)
+            continue
+
+        win = bet['won']
+        odds = bet['odds']
+        model_probability = float(bet['model_probability'])
+
+        value = odds * model_probability
+
+        if value > 1:
+            if tracking_bankroll and current_bankroll < stake:
+                actual_stake = current_bankroll  # Felrakjuk a maradékot
             else:
-                bankroll.append(bankroll[-1] - stake)
-        else:
-            stakes_used.append(0)  # Nem tettél tétet
-            bankroll.append(bankroll[-1])
+                actual_stake = stake
 
-    return bankroll, stakes_used
+            stakes.append(actual_stake)
+
+            if win:
+                profit = actual_stake * (odds - 1)
+            else:
+                profit = -actual_stake
+        else:
+            stakes.append(0)
+            profit = 0
+
+        bankroll.append(current_bankroll + profit)
+
+    return bankroll, stakes
