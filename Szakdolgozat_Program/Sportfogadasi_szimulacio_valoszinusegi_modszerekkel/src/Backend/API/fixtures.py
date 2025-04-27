@@ -4,6 +4,7 @@ from src.Backend.API.make_api_request import make_api_request
 from src.Backend.API.odds import fetch_odds_for_fixture
 from src.Backend.DB.fixtures import read_from_fixtures, write_to_fixtures, read_head_to_head_stats, \
     check_h2h_match_exists, update_fixture_status, get_fixtures_with_updatable_status
+from src.Backend.DB.predictions import evaluate_predictions
 from src.Backend.DB.statistics import read_from_match_statistics, write_to_match_statistics
 from src.Backend.DB.utils import normalize_date
 
@@ -255,7 +256,7 @@ def get_head_to_head_stats(home_team_id, away_team_id):
         # Statok mentése külön (ha van)
         stats = get_match_statistics(match_id)
         if stats and any(
-            any(item.get("value") not in [None, 0, ""] for item in team["statistics"]) for team in stats
+                any(item.get("value") not in [None, 0, ""] for item in team["statistics"]) for team in stats
         ):
             for team_stat in stats:
                 team_id = team_stat['team']['id']
@@ -309,5 +310,11 @@ def update_fixtures():
     if updates:
         update_fixture_status(updates)
         print(f"\n✅ Összesen {len(updates)} mérkőzés frissítve.")
+
+        for new_status, new_date, home_score, away_score, fixture_id in updates:
+            if home_score is not None and away_score is not None:
+                evaluate_predictions(fixture_id, home_score, away_score)
+
     else:
         print("ℹ️ Nincs új adat a frissítéshez.")
+
