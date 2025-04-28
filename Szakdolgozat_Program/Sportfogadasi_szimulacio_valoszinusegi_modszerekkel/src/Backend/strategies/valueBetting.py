@@ -14,9 +14,12 @@ def value_betting(bets, stake, bankroll_start=None):
 
         win = bet['won']
         odds = bet['odds']
-        model_probability = float(bet['model_probability'])
+        model_probability = float(bet['model_probability']) / 100
 
         value = odds * model_probability
+
+        # 🔥 KIÍRÁS a konzolra minden fogadásnál
+        print(f"[Value Betting] Odds: {odds:.2f}, Model Probability: {model_probability:.4f}, Value: {value:.4f}")
 
         if value > 1:
             if tracking_bankroll and current_bankroll < stake:

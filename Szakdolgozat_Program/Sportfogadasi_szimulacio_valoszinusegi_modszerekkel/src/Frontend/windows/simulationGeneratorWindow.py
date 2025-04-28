@@ -645,20 +645,28 @@ class SimulationGeneratorWindow(tk.Toplevel):
             return
 
         try:
+            filename = os.path.basename(file_path)
+
+            # ÚJ: Bankroll kiszedése a fájlnévből
+            if "bankroll_" in filename:
+                bankroll_part = filename.split("bankroll_")[1]
+                bankroll_value = bankroll_part.split("_")[0]  # az első _ utáni rész a szám
+                self.bankroll_start = float(bankroll_value)
+            else:
+                self.bankroll_start = None  # Nincs bankroll infó -> sima profit alapú
+
             with open(file_path, "r", encoding="utf-8-sig") as f:
                 lines = f.readlines()
 
             data = []
             group_number = 1
 
-            # Első lépésben meghatározzuk, hogy bankroll-alapú vagy profit-alapú fájlról van-e szó
-            bankroll_text = self.bankroll_entry.get().strip()
-            self.bankroll_start = float(bankroll_text) if bankroll_text else None
-
             for line in lines:
                 line = line.strip()
-                if not line:
-                    group_number += 1
+                if not line or line.startswith("#"):
+                    # Ha üres vagy komment sor, akkor figyelmen kívül hagyjuk
+                    if line.startswith("# Csoport:"):
+                        group_number = int(line.split(":")[1].strip())
                     continue
 
                 parts = line.split(";")
@@ -668,11 +676,10 @@ class SimulationGeneratorWindow(tk.Toplevel):
                 # Az utolsó oszlop értéke (lehet bankroll vagy profit)
                 value = float(parts[8])
 
-                # Ha van beállítva bankroll, akkor a fájlban lévő értékből kiszámoljuk a profitot
+                # Ha van bankroll, akkor a profitot számoljuk
                 if self.bankroll_start is not None:
                     profit = value - self.bankroll_start
                 else:
-                    # Ha nincs bankroll, akkor az értéket közvetlenül profitként értelmezzük
                     profit = value
 
                 data.append({
@@ -684,7 +691,7 @@ class SimulationGeneratorWindow(tk.Toplevel):
                     "was_correct": int(parts[5]),
                     "odds": float(parts[6]),
                     "stake": float(parts[7]),
-                    "profit": profit,  # Mindig profitot tárolunk
+                    "profit": profit,
                     "group_number": group_number
                 })
 
@@ -694,7 +701,7 @@ class SimulationGeneratorWindow(tk.Toplevel):
             self.selected_fixtures = df
             self.update_summary_widgets()
 
-            messagebox.showinfo("Siker", "A szimulációs CSV sikeresen betöltve!")
+            messagebox.showinfo("Siker", f"A szimulációs CSV sikeresen betöltve!\nBankroll: {self.bankroll_start}")
 
         except Exception as e:
             messagebox.showerror("Hiba", f"Nem sikerült a CSV betöltése: {e}")
