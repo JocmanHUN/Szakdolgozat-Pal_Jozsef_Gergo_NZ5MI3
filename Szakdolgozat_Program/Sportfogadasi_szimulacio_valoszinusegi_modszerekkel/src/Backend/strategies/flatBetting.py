@@ -1,7 +1,8 @@
 def flat_betting(bets, stake, bankroll_start=None):
     bankroll = [bankroll_start if bankroll_start is not None else 0]
     stakes = []
-    tracking_bankroll = bankroll_start is not None
+    # Módosított feltétel: csak akkor követjük a bankrollt, ha az létezik ÉS pozitív
+    tracking_bankroll = bankroll_start is not None and bankroll_start > 0
 
     for bet in bets:
         current_bankroll = bankroll[-1]

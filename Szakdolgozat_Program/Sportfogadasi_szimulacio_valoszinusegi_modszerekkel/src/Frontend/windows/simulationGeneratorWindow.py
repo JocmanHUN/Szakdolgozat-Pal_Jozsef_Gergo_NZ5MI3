@@ -14,6 +14,7 @@ from src.Backend.strategies.valueBetting import value_betting
 
 # Modellek név - ID párosok
 MODEL_MAPPING = {
+    "Összes modell": [1, 2, 3, 4, 5, 6],  # Új opció az összes modellhez
     "Bayes Classic": [1],
     "Monte Carlo": [2],
     "Poisson": [3],
@@ -132,6 +133,8 @@ class SimulationGeneratorWindow(tk.Toplevel):
         self.import_button = ttk.Button(button_frame, text="CSV betöltése", command=self.load_simulation_csv)
         self.import_button.grid(row=0, column=2, padx=10)
 
+        self.avg_chart_button = ttk.Button(button_frame, text="Átlag grafikon", command=self.show_average_chart)
+        self.avg_chart_button.grid(row=0, column=3, padx=10)
         self.bankroll_start = None
         # --- Diagram és statisztikai táblázat inicializálása ---
         self.init_summary_widgets()
@@ -496,8 +499,10 @@ class SimulationGeneratorWindow(tk.Toplevel):
                 all_stakes.extend(group_df["stake"].tolist())
 
                 if self.bankroll_start is not None:
+                    # Ha van bankroll, akkor a bankrollhoz képest számoljuk
                     group_profit_percent = (netto_profit / self.bankroll_start) * 100
                 else:
+                    # Ha nincs bankroll, akkor a befektetett tét megtérülését számoljuk (ROI)
                     if total_stake_in_group > 0:
                         group_profit_percent = (final_profit / total_stake_in_group) * 100
                     else:
@@ -647,13 +652,25 @@ class SimulationGeneratorWindow(tk.Toplevel):
         try:
             filename = os.path.basename(file_path)
 
-            # ÚJ: Bankroll kiszedése a fájlnévből
+            # ÚJ: Fájl alapján kitaláljuk a stratégiát
+            self.selected_strategy_name = None
+            if "Kelly_Criterion" in filename:
+                self.selected_strategy_name = "Kelly Criterion"
+            elif "Flat_Betting" in filename:
+                self.selected_strategy_name = "Flat Betting"
+            elif "Martingale" in filename:
+                self.selected_strategy_name = "Martingale"
+            elif "Fibonacci" in filename:
+                self.selected_strategy_name = "Fibonacci"
+            elif "Value_Betting" in filename:
+                self.selected_strategy_name = "Value Betting"
+
             if "bankroll_" in filename:
                 bankroll_part = filename.split("bankroll_")[1]
-                bankroll_value = bankroll_part.split("_")[0]  # az első _ utáni rész a szám
+                bankroll_value = bankroll_part.split("_")[0]
                 self.bankroll_start = float(bankroll_value)
             else:
-                self.bankroll_start = None  # Nincs bankroll infó -> sima profit alapú
+                self.bankroll_start = None
 
             with open(file_path, "r", encoding="utf-8-sig") as f:
                 lines = f.readlines()
@@ -664,7 +681,6 @@ class SimulationGeneratorWindow(tk.Toplevel):
             for line in lines:
                 line = line.strip()
                 if not line or line.startswith("#"):
-                    # Ha üres vagy komment sor, akkor figyelmen kívül hagyjuk
                     if line.startswith("# Csoport:"):
                         group_number = int(line.split(":")[1].strip())
                     continue
@@ -673,27 +689,41 @@ class SimulationGeneratorWindow(tk.Toplevel):
                 if len(parts) < 9:
                     raise ValueError("Érvénytelen sor a CSV fájlban!")
 
-                # Az utolsó oszlop értéke (lehet bankroll vagy profit)
                 value = float(parts[8])
 
-                # Ha van bankroll, akkor a profitot számoljuk
-                if self.bankroll_start is not None:
-                    profit = value - self.bankroll_start
+                if self.selected_strategy_name == "Kelly Criterion":
+                    # 🔥 Kelly: a value maga a bankroll!
+                    data.append({
+                        "fixture_id": parts[0],
+                        "home_team": parts[1],
+                        "away_team": parts[2],
+                        "match_date": parts[3],
+                        "predicted_outcome": parts[4],
+                        "was_correct": int(parts[5]),
+                        "odds": float(parts[6]),
+                        "stake": float(parts[7]),
+                        "bankroll": value,
+                        "group_number": group_number
+                    })
                 else:
-                    profit = value
+                    # 🔥 Többi stratégia: profit kiszámítása
+                    if self.bankroll_start is not None:
+                        profit = value - self.bankroll_start
+                    else:
+                        profit = value
 
-                data.append({
-                    "fixture_id": parts[0],
-                    "home_team": parts[1],
-                    "away_team": parts[2],
-                    "match_date": parts[3],
-                    "predicted_outcome": parts[4],
-                    "was_correct": int(parts[5]),
-                    "odds": float(parts[6]),
-                    "stake": float(parts[7]),
-                    "profit": profit,
-                    "group_number": group_number
-                })
+                    data.append({
+                        "fixture_id": parts[0],
+                        "home_team": parts[1],
+                        "away_team": parts[2],
+                        "match_date": parts[3],
+                        "predicted_outcome": parts[4],
+                        "was_correct": int(parts[5]),
+                        "odds": float(parts[6]),
+                        "stake": float(parts[7]),
+                        "profit": profit,
+                        "group_number": group_number
+                    })
 
             df = pd.DataFrame(data)
             df["match_date"] = pd.to_datetime(df["match_date"])
@@ -726,6 +756,146 @@ class SimulationGeneratorWindow(tk.Toplevel):
         self.stats_tree.column("Érték", anchor="center", width=100)
         self.stats_tree.pack(fill="both", expand=True)
 
+    def show_average_chart(self):
+        """
+        Külön gombra kattintva megjeleníti a mérkőzéscsoportok átlagos teljesítményét
+        egy vonallal a grafikonon.
+        """
+        if self.selected_fixtures is None:
+            messagebox.showwarning("Figyelmeztetés", "Nincs adat a megjelenítéshez!")
+            return
 
+        # Létrehozunk egy új ablakot az átlag grafikonnak
+        avg_window = tk.Toplevel(self)
+        avg_window.title("Átlagos teljesítmény")
+        avg_window.geometry("800x600")
+        avg_window.minsize(800, 600)
+
+        # Csoport számok lekérése
+        group_numbers = self.selected_fixtures["group_number"].unique()
+
+        # Meghatározzuk a leghosszabb sorozat hosszát
+        max_length = 0
+        for group in group_numbers:
+            group_df = self.selected_fixtures[self.selected_fixtures["group_number"] == group]
+            max_length = max(max_length, len(group_df))
+
+        # Inicializáljuk a kumulált értékek és számláló listákat
+        cumulative_values = [0] * max_length
+        counts = [0] * max_length
+
+        # Gyűjtsük az értékeket minden csoportból
+        for group in group_numbers:
+            group_df = self.selected_fixtures[self.selected_fixtures["group_number"] == group]
+
+            # Ellenőrizzük, melyik oszlop tartalmazza az értékeket (profit vagy bankroll)
+            if "profit" in group_df.columns:
+                values = group_df["profit"].tolist()
+            else:
+                values = group_df["bankroll"].tolist()
+
+            # Adjuk hozzá az értékeket a kumulált összeghez
+            for i, value in enumerate(values):
+                cumulative_values[i] += value
+                counts[i] += 1
+
+        # Számoljuk ki az átlagokat
+        average_values = []
+        for i in range(max_length):
+            if counts[i] > 0:
+                average_values.append(cumulative_values[i] / counts[i])
+            else:
+                # Ha nincs adat ebben a pozícióban, használjuk az előző értéket vagy nullát
+                if average_values:
+                    average_values.append(average_values[-1])
+                else:
+                    average_values.append(0)
+
+        # Rajzoljuk meg a grafikont
+        figure, ax = plt.subplots(figsize=(8, 6))
+
+        # Átlag vonal megjelenítése
+        ax.plot(range(1, len(average_values) + 1), average_values, linewidth=2, color='blue',
+                label='Csoportok átlaga')
+
+        # Ha van bankroll, jelöljük a kiindulási pontot
+        if self.bankroll_start is not None:
+            ax.axhline(y=self.bankroll_start, color='black', linestyle='-', linewidth=0.5)
+            ax.axhline(y=0, color='red', linestyle='-', linewidth=0.5)
+            ax.set_ylabel("Bankroll")
+        else:
+            ax.set_ylabel("Kumulált profit")
+
+        # Szórás számítása és megjelenítése (opcionális)
+        if len(group_numbers) > 1:
+            # Számítsuk ki a szórást minden pozícióra
+            std_values = []
+            for i in range(max_length):
+                if counts[i] > 1:
+                    group_values = []
+                    for group in group_numbers:
+                        group_df = self.selected_fixtures[self.selected_fixtures["group_number"] == group]
+                        if i < len(group_df):
+                            if "profit" in group_df.columns:
+                                group_values.append(group_df["profit"].iloc[i])
+                            else:
+                                group_values.append(group_df["bankroll"].iloc[i])
+
+                    std_values.append(pd.Series(group_values).std())
+                else:
+                    std_values.append(0)
+
+            # Töltsük ki a variancia területet
+            ax.fill_between(
+                range(1, len(average_values) + 1),
+                [av - std for av, std in zip(average_values, std_values)],
+                [av + std for av, std in zip(average_values, std_values)],
+                color='blue', alpha=0.2, label='±1 szórás'
+            )
+
+        ax.set_title(f"{self.strategy_combobox.get()} - {self.model_combobox.get()} - Átlagos teljesítmény")
+        ax.set_xlabel("Mérkőzések száma")
+        ax.legend(loc='best')
+        ax.grid(True, linestyle='--', alpha=0.7)
+
+        # Statisztikai információk a grafikonhoz
+        stats_frame = ttk.Frame(avg_window)
+        stats_frame.pack(side="bottom", fill="x", padx=10, pady=10)
+
+        # Létrehozunk néhány statisztikát az átlagról
+        ttk.Label(stats_frame, text=f"Csoportok száma: {len(group_numbers)}").pack(side="left", padx=10)
+
+        if average_values:
+            final_avg = average_values[-1]
+            if self.bankroll_start is not None:
+                profit_percent = ((
+                                              final_avg - self.bankroll_start) / self.bankroll_start) * 100 if self.bankroll_start > 0 else 0
+                ttk.Label(stats_frame,
+                          text=f"Végső átlag bankroll: {final_avg:.2f} ({profit_percent:+.2f}%)").pack(side="left",
+                                                                                                       padx=10)
+            else:
+                ttk.Label(stats_frame,
+                          text=f"Végső átlag profit: {final_avg:.2f}").pack(side="left", padx=10)
+
+        # Elhelyezzük a grafikont az ablakban
+        canvas = FigureCanvasTkAgg(figure, master=avg_window)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Mentés gomb
+        def save_chart():
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".png",
+                filetypes=[("PNG fájlok", "*.png"), ("JPEG fájlok", "*.jpg"), ("PDF fájlok", "*.pdf")]
+            )
+            if file_path:
+                figure.savefig(file_path, dpi=300, bbox_inches="tight")
+                messagebox.showinfo("Siker", f"A grafikon sikeresen elmentve: {file_path}")
+
+        button_frame = ttk.Frame(avg_window)
+        button_frame.pack(side="bottom", fill="x", padx=10, pady=10)
+
+        ttk.Button(button_frame, text="Grafikon mentése", command=save_chart).pack(side="left", padx=10)
+        ttk.Button(button_frame, text="Bezárás", command=avg_window.destroy).pack(side="right", padx=10)
 
 
