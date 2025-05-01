@@ -14,7 +14,7 @@ def main():
 
     if response:  # Ha a felhasználó Igen-t választott
         print("🔄 Mérkőzések frissítése...")
-        #save_pre_match_fixtures()
+        save_pre_match_fixtures()
         update_fixtures()
         batch_evaluate_all_predictions()
         print("✅ Frissítés kész!")

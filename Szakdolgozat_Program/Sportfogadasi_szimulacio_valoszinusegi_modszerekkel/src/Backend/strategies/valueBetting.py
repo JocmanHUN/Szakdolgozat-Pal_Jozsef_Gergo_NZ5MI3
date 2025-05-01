@@ -18,9 +18,6 @@ def value_betting(bets, stake, bankroll_start=None):
 
         value = odds * model_probability
 
-        # 🔥 KIÍRÁS a konzolra minden fogadásnál
-        print(f"[Value Betting] Odds: {odds:.2f}, Model Probability: {model_probability:.4f}, Value: {value:.4f}")
-
         if value > 1:
             if tracking_bankroll and current_bankroll < stake:
                 actual_stake = current_bankroll  # Felrakjuk a maradékot

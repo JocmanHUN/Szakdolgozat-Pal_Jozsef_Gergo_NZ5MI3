@@ -252,7 +252,7 @@ class VisualizationWindow(tk.Toplevel):
             if not odds or odds <= 1.01:
                 continue
 
-            model_prob = float(str(db_prediction["probability"]).replace(",", ".")) / 100
+            model_prob = float(str(db_prediction["probability"]).replace(",", "."))
 
             # Determine if bet is placed (for certain strategies)
             placed_bet = True
