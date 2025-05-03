@@ -1,7 +1,7 @@
 from src.Backend.DB.fixtures import get_last_matches
 
 
-def calculate_prior_probabilities(team_id, num_matches=10, decay_factor=0.9):
+def calculate_weighted_form_probabilities(team_id, num_matches=10, decay_factor=0.9):
     """
     Súlyozottan számítja ki a múltbeli győzelem, döntetlen, vereség arányokat.
     """
@@ -41,9 +41,9 @@ def calculate_prior_probabilities(team_id, num_matches=10, decay_factor=0.9):
     return priors, num_valid_matches
 
 
-def bayes_classic_predict(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
-    home_priors, total_matches_home = calculate_prior_probabilities(home_team_id, num_matches, decay_factor)
-    away_priors, total_matches_away = calculate_prior_probabilities(away_team_id, num_matches, decay_factor)
+def predict_with_form_average_model(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
+    home_priors, total_matches_home = calculate_weighted_form_probabilities(home_team_id, num_matches, decay_factor)
+    away_priors, total_matches_away = calculate_weighted_form_probabilities(away_team_id, num_matches, decay_factor)
 
     if home_priors is None or away_priors is None or total_matches_home == 0 or total_matches_away == 0:
         return None

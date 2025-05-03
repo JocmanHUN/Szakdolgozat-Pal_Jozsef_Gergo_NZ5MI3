@@ -1,7 +1,7 @@
 from src.Backend.DB.fixtures import get_last_matches
 
 
-def calculate_weighted_bayes_probabilities(team_id, num_matches=10, decay_factor=0.9):
+def calculate_weighted_form_multiplicative(team_id, num_matches=10, decay_factor=0.9):
     """
     Súlyozottan számítja ki a múltbeli győzelem, döntetlen, vereség arányokat.
     """
@@ -45,9 +45,9 @@ def calculate_weighted_bayes_probabilities(team_id, num_matches=10, decay_factor
     return priors
 
 
-def bayes_empirical_predict(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
-    home_probs = calculate_weighted_bayes_probabilities(home_team_id, num_matches, decay_factor)
-    away_probs = calculate_weighted_bayes_probabilities(away_team_id, num_matches, decay_factor)
+def predict_with_form_multiplicative_model(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
+    home_probs = calculate_weighted_form_multiplicative(home_team_id, num_matches, decay_factor)
+    away_probs = calculate_weighted_form_multiplicative(away_team_id, num_matches, decay_factor)
 
     if home_probs is None or away_probs is None:
         return None  # Ha nincs elég adat, nem tudunk becslést adni
