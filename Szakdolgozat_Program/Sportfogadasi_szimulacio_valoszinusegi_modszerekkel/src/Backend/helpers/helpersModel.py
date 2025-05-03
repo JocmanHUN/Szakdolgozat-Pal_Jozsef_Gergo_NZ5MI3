@@ -3,8 +3,8 @@ from datetime import datetime
 from src.Backend.API.fixtures import get_league_id_by_fixture
 from src.Backend.DB.predictions import save_model_prediction
 from src.Backend.DB.teams import get_league_by_team, write_league_id_to_team
-from src.Backend.probability_models.bayes_classic_model import bayes_classic_predict
-from src.Backend.probability_models.bayes_empirical_model import bayes_empirical_predict
+from src.Backend.probability_models.form_average_model import predict_with_form_average_model
+from src.Backend.probability_models.form_multiplicative_model import predict_with_form_multiplicative_model
 from src.Backend.probability_models.elo_model import elo_predict
 from src.Backend.probability_models.logistic_regression_model import logistic_regression_predict
 from src.Backend.probability_models.monte_carlo_model import monte_carlo_predict
@@ -33,10 +33,10 @@ def save_all_predictions(fixture_id, home_team_id, away_team_id, match_group_id)
             return
 
     models = {
-        1: bayes_classic_predict,
+        1: predict_with_form_average_model,
         2: monte_carlo_predict,
         3: poisson_predict,
-        4: bayes_empirical_predict,
+        4: predict_with_form_multiplicative_model,
         5: logistic_regression_predict,
         6: lambda h, a: elo_predict(h, a, league_id, season)  # Elo-modell csapat alapján szerzett ligával
     }
