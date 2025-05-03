@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from src.Backend.probability_models.bayes_classic_model import calculate_prior_probabilities, bayes_classic_predict
+from src.Backend.probability_models.form_average_model import calculate_weighted_form_probabilities, predict_with_form_average_model
 
 
 class TestProbabilityModels(unittest.TestCase):
@@ -10,7 +10,7 @@ class TestProbabilityModels(unittest.TestCase):
     def test_calculate_prior_probabilities_no_matches(self, mock_get_last_matches):
         """Test when no matches are returned"""
         mock_get_last_matches.return_value = []
-        priors, num_matches = calculate_prior_probabilities(team_id=1, num_matches=10)
+        priors, num_matches = calculate_weighted_form_probabilities(team_id=1, num_matches=10)
 
         self.assertIsNone(priors)
         self.assertEqual(num_matches, 0)
@@ -23,7 +23,7 @@ class TestProbabilityModels(unittest.TestCase):
             {'home_team_id': 1, 'away_team_id': 2, 'score_home': None, 'score_away': None},
             {'home_team_id': 1, 'away_team_id': 3, 'score_home': None, 'score_away': None}
         ]
-        priors, num_matches = calculate_prior_probabilities(team_id=1, num_matches=10)
+        priors, num_matches = calculate_weighted_form_probabilities(team_id=1, num_matches=10)
 
         self.assertIsNone(priors)
         self.assertEqual(num_matches, 0)
@@ -35,7 +35,7 @@ class TestProbabilityModels(unittest.TestCase):
             {'home_team_id': 1, 'away_team_id': 2, 'score_home': 2, 'score_away': 0},
             {'home_team_id': 1, 'away_team_id': 3, 'score_home': 1, 'score_away': 0}
         ]
-        priors, num_matches = calculate_prior_probabilities(team_id=1, num_matches=10)
+        priors, num_matches = calculate_weighted_form_probabilities(team_id=1, num_matches=10)
 
         self.assertEqual(num_matches, 2)
         self.assertAlmostEqual(priors['win'], 1.0)
@@ -49,7 +49,7 @@ class TestProbabilityModels(unittest.TestCase):
             {'home_team_id': 1, 'away_team_id': 2, 'score_home': 0, 'score_away': 2},
             {'home_team_id': 3, 'away_team_id': 1, 'score_home': 3, 'score_away': 1}
         ]
-        priors, num_matches = calculate_prior_probabilities(team_id=1, num_matches=10)
+        priors, num_matches = calculate_weighted_form_probabilities(team_id=1, num_matches=10)
 
         self.assertEqual(num_matches, 2)
         self.assertAlmostEqual(priors['win'], 0.0)
@@ -64,7 +64,7 @@ class TestProbabilityModels(unittest.TestCase):
             {'home_team_id': 3, 'away_team_id': 1, 'score_home': 1, 'score_away': 1},  # draw
             {'home_team_id': 1, 'away_team_id': 4, 'score_home': 0, 'score_away': 3}  # loss
         ]
-        priors, num_matches = calculate_prior_probabilities(team_id=1, num_matches=10, decay_factor=1.0)
+        priors, num_matches = calculate_weighted_form_probabilities(team_id=1, num_matches=10, decay_factor=1.0)
 
         self.assertEqual(num_matches, 3)
         self.assertAlmostEqual(priors['win'], 1 / 3)
@@ -80,7 +80,7 @@ class TestProbabilityModels(unittest.TestCase):
             {'home_team_id': 1, 'away_team_id': 4, 'score_home': 2, 'score_away': 0}  # win (newest)
         ]
         decay_factor = 0.5
-        priors, num_matches = calculate_prior_probabilities(team_id=1, num_matches=10, decay_factor=decay_factor)
+        priors, num_matches = calculate_weighted_form_probabilities(team_id=1, num_matches=10, decay_factor=decay_factor)
 
         # Calculate expected weights: oldest to newest: 0.25, 0.5, 1.0
         # Total weight: 1.75
@@ -94,17 +94,17 @@ class TestProbabilityModels(unittest.TestCase):
     def test_bayes_classic_predict_no_data(self, mock_calculate_priors):
         """Test when there's no data for one or both teams"""
         mock_calculate_priors.side_effect = [(None, 0), (None, 0)]
-        result = bayes_classic_predict(home_team_id=1, away_team_id=2)
+        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
         self.assertIsNone(result)
 
         # Test when home team has no matches
         mock_calculate_priors.side_effect = [(None, 0), ({"win": 0.5, "draw": 0.3, "loss": 0.2}, 5)]
-        result = bayes_classic_predict(home_team_id=1, away_team_id=2)
+        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
         self.assertIsNone(result)
 
         # Test when away team has no matches
         mock_calculate_priors.side_effect = [({"win": 0.6, "draw": 0.2, "loss": 0.2}, 10), (None, 0)]
-        result = bayes_classic_predict(home_team_id=1, away_team_id=2)
+        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
         self.assertIsNone(result)
 
     @patch('src.Backend.probability_models.bayes_classic_model.calculate_prior_probabilities')
@@ -115,7 +115,7 @@ class TestProbabilityModels(unittest.TestCase):
 
         mock_calculate_priors.side_effect = [(home_priors, 10), (away_priors, 10)]
 
-        result = bayes_classic_predict(home_team_id=1, away_team_id=2)
+        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
 
         # Expected calculations:
         # P_draw_given_played = (0.2*10 + 0.3*10) / 20 = 0.25
@@ -139,7 +139,7 @@ class TestProbabilityModels(unittest.TestCase):
 
         mock_calculate_priors.side_effect = [(home_priors, 15), (away_priors, 5)]
 
-        result = bayes_classic_predict(home_team_id=1, away_team_id=2)
+        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
 
         # Expected calculations:
         # P_draw_given_played = (0.2*15 + 0.4*5) / 20 = 0.25
