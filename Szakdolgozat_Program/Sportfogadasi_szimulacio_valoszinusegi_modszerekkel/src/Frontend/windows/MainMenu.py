@@ -18,7 +18,7 @@ class MainMenu(tk.Frame):
         self.sort_orders = {"fixture_id": False, "home_team": False, "away_team": False, "match_date": False}
 
         # Főcím hozzáadása
-        title_label = ttk.Label(self, text="Sportfogadás valószínűségi és statisztikai alapokon",
+        title_label = ttk.Label(self, text="Sportfogadás nyerességeségének vizsgálata",
                                 font=("Arial", 16, "bold"))
         title_label.pack(pady=20)
 
