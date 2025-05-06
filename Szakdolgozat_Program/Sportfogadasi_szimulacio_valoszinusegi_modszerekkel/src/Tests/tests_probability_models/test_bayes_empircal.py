@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-from src.Backend.probability_models.form_multiplicative_model import (
+from src.Backend.probability_models.balance_model import (
     calculate_weighted_form_multiplicative,
-    predict_with_form_multiplicative_model
+    predict_with_balance_model
 )
 
 
@@ -100,7 +100,7 @@ class TestBayesPredictionModels(unittest.TestCase):
         mock_get_last_matches.return_value = self.mock_matches
 
         # Predict match outcome
-        prediction = predict_with_form_multiplicative_model(1, 2, num_matches=5, decay_factor=0.9)
+        prediction = predict_with_balance_model(1, 2, num_matches=5, decay_factor=0.9)
 
         self.assertIsNotNone(prediction, "Prediction should not be None")
 
@@ -123,7 +123,7 @@ class TestBayesPredictionModels(unittest.TestCase):
         """
         with patch('src.Backend.DB.fixtures.get_last_matches', return_value=[]):
             # No matches for either team
-            prediction = predict_with_form_multiplicative_model(1, 2)
+            prediction = predict_with_balance_model(1, 2)
 
             # Instead of checking for None, check for default 50-50 prediction
             self.assertIsNotNone(prediction, "Prediction should have default values")
@@ -143,7 +143,7 @@ class TestBayesPredictionModels(unittest.TestCase):
             with self.subTest(decay_factor=decay_factor):
                 # Calculate probabilities and predict
                 probs = calculate_weighted_form_multiplicative(1, num_matches=5, decay_factor=decay_factor)
-                prediction = predict_with_form_multiplicative_model(1, 2, num_matches=5, decay_factor=decay_factor)
+                prediction = predict_with_balance_model(1, 2, num_matches=5, decay_factor=decay_factor)
 
                 self.assertIsNotNone(probs,
                                      f"Probabilities should not be None for decay factor {decay_factor}")

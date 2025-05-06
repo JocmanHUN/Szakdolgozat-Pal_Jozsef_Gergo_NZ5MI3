@@ -41,7 +41,7 @@ def calculate_weighted_form_probabilities(team_id, num_matches=10, decay_factor=
     return priors, num_valid_matches
 
 
-def predict_with_form_average_model(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
+def predict_with_veto_model(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
     home_priors, total_matches_home = calculate_weighted_form_probabilities(home_team_id, num_matches, decay_factor)
     away_priors, total_matches_away = calculate_weighted_form_probabilities(away_team_id, num_matches, decay_factor)
 

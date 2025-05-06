@@ -45,7 +45,7 @@ def calculate_weighted_form_multiplicative(team_id, num_matches=10, decay_factor
     return priors
 
 
-def predict_with_form_multiplicative_model(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
+def predict_with_balance_model(home_team_id, away_team_id, num_matches=10, decay_factor=0.9):
     home_probs = calculate_weighted_form_multiplicative(home_team_id, num_matches, decay_factor)
     away_probs = calculate_weighted_form_multiplicative(away_team_id, num_matches, decay_factor)
 

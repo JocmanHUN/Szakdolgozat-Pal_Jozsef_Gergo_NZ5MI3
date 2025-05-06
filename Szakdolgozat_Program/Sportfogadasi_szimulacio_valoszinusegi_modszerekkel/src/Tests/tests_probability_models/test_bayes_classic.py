@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from src.Backend.probability_models.form_average_model import calculate_weighted_form_probabilities, predict_with_form_average_model
+from src.Backend.probability_models.veto_model import calculate_weighted_form_probabilities, predict_with_veto_model
 
 
 class TestProbabilityModels(unittest.TestCase):
@@ -94,17 +94,17 @@ class TestProbabilityModels(unittest.TestCase):
     def test_bayes_classic_predict_no_data(self, mock_calculate_priors):
         """Test when there's no data for one or both teams"""
         mock_calculate_priors.side_effect = [(None, 0), (None, 0)]
-        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
+        result = predict_with_veto_model(home_team_id=1, away_team_id=2)
         self.assertIsNone(result)
 
         # Test when home team has no matches
         mock_calculate_priors.side_effect = [(None, 0), ({"win": 0.5, "draw": 0.3, "loss": 0.2}, 5)]
-        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
+        result = predict_with_veto_model(home_team_id=1, away_team_id=2)
         self.assertIsNone(result)
 
         # Test when away team has no matches
         mock_calculate_priors.side_effect = [({"win": 0.6, "draw": 0.2, "loss": 0.2}, 10), (None, 0)]
-        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
+        result = predict_with_veto_model(home_team_id=1, away_team_id=2)
         self.assertIsNone(result)
 
     @patch('src.Backend.probability_models.bayes_classic_model.calculate_prior_probabilities')
@@ -115,7 +115,7 @@ class TestProbabilityModels(unittest.TestCase):
 
         mock_calculate_priors.side_effect = [(home_priors, 10), (away_priors, 10)]
 
-        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
+        result = predict_with_veto_model(home_team_id=1, away_team_id=2)
 
         # Expected calculations:
         # P_draw_given_played = (0.2*10 + 0.3*10) / 20 = 0.25
@@ -139,7 +139,7 @@ class TestProbabilityModels(unittest.TestCase):
 
         mock_calculate_priors.side_effect = [(home_priors, 15), (away_priors, 5)]
 
-        result = predict_with_form_average_model(home_team_id=1, away_team_id=2)
+        result = predict_with_veto_model(home_team_id=1, away_team_id=2)
 
         # Expected calculations:
         # P_draw_given_played = (0.2*15 + 0.4*5) / 20 = 0.25
