@@ -1377,8 +1377,7 @@ class SimulationGeneratorWindow(tk.Toplevel):
             min_bankroll = min(data["final_bankrolls"]) if data["final_bankrolls"] else 0
             bankruptcies = data["bankruptcies"]
 
-            tree.insert("", "end", iid=model, values=(
-                model.replace("_", " "),
+            tree.insert("", "end", iid=model,values=(get_display_name(model),
                 f"{avg_bankroll:.2f}",
                 f"{profit_percent:+.2f}%",
                 f"{std_dev:.2f}",
@@ -1466,7 +1465,7 @@ class SimulationGeneratorWindow(tk.Toplevel):
                         average_values,
                         linewidth=2,
                         color=colors[idx % len(colors)],
-                        label=model.replace("_", " ")
+                        label=get_display_name(model)
                     )
 
             # Általános grafikon beállítások
@@ -1554,7 +1553,7 @@ class SimulationGeneratorWindow(tk.Toplevel):
             else:
                 ax.set_ylabel("Profit")
 
-            ax.set_title(f"{model_name.replace('_', ' ')} - Részletes elemzés - {selected_strategy}")
+            ax.set_title(f"{get_display_name(model_name)} - Részletes elemzés - {selected_strategy}")
             ax.set_xlabel("Mérkőzések száma")
             ax.legend()  # A legend megtartva, de most csak az "Átlag" felirat lesz benne
             ax.grid(True, linestyle='--', alpha=0.7)
@@ -2041,6 +2040,12 @@ class SimulationGeneratorWindow(tk.Toplevel):
             messagebox.showerror("Hiba", f"Hiba történt a CSV betöltése során:\n{str(e)}")
             return False
 
+def get_display_name(model_id):
+    mapping = {
+        "Bayes_Classic": "Veto Model",
+        "Bayes_Empirical": "Balance Model"
+    }
+    return mapping.get(model_id, model_id.replace("_", " "))
 
 
 
